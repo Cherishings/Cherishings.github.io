@@ -182,22 +182,17 @@
 </ul>
 <p>换算公式：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">TargetPosition = pulse × (180 / 65535)</span><br></pre></td></tr></table></figure>
-
 <p>给到 65535，对应就是 180° 位置。</p>
-<h3 id="速度环"><a href="#速度环" class="headerlink" title="速度环"></a>速度环</h3><p>速度环设置 <code>TargetVelocity</code>，单位按脉冲&#x2F;秒理解，换算关系：</p>
+<h3 id="速度环"><a href="#速度环" class="headerlink" title="速度环"></a>速度环</h3><p>速度环设置 <code>TargetVelocity</code>，单位按脉冲/秒理解，换算关系：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">TargetVelocity = X × 60 / 131072   RPM</span><br></pre></td></tr></table></figure>
-
 <p>这里的 <code>131072</code> 不是固件固定值，要根据电机输出轴编码器位数来定。如果你的电机是 X2-7 或 X4-P36，输出轴编码器为 18 位，公式替换为：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">TargetVelocity = X × 60 / 262144   RPM</span><br></pre></td></tr></table></figure>
-
 <p>举例：输入脉冲值 10000，则输出端转速 <code>10000 × 60 / 131072 ≈ 4.57 RPM</code>，换算输入端为 <code>4.57 × 20 = 91.5 RPM</code>。主站侧给的值，最后还要结合编码器分辨率和传动比，才能对应到实际轴端速度。</p>
 <h3 id="电流环"><a href="#电流环" class="headerlink" title="电流环"></a>电流环</h3><p>电流环根据电机额定电流和目标输入电流，反推需要写入的目标 IQ 值：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">额定电流 / 1000 = 输入电流 / 目标IQ值</span><br></pre></td></tr></table></figure>
-
-<p>举例：额定电流 1A，想输入 0.1A，则目标 IQ 值 &#x3D; 100。</p>
+<p>举例：额定电流 1A，想输入 0.1A，则目标 IQ 值 = 100。</p>
 <p>额定 IQ 电流值可以从上位机高级参数中读取，对应 SDO 对象：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">MAX Torque = MaxTorque(0x6072) × 0.001f × MOTOR RATE IQCURRENT</span><br></pre></td></tr></table></figure>
-
 <hr>
 <h2 id="二、DC-时钟与-Sync0"><a href="#二、DC-时钟与-Sync0" class="headerlink" title="二、DC 时钟与 Sync0"></a>二、DC 时钟与 Sync0</h2><h3 id="DC-是什么"><a href="#DC-是什么" class="headerlink" title="DC 是什么"></a>DC 是什么</h3><p>DC，全称 <strong>Distributed Clocks</strong>，也就是 EtherCAT 的分布式时钟。可以把它理解成：每个从站内部都有一个高精度硬件时钟，主站通过计算偏移量，把这些从站时钟校准成全网统一的时间基准。</p>
 <p>DC 的意义不只是”大家时间一样”，更在于：</p>
@@ -238,7 +233,6 @@
 </ul>
 <p>简单说，RT-PREEMPT 让 Linux 从”尽力而为”的通用系统，变成”调度延迟有上界保证”的实时系统。不用实时内核，1ms 周期在高负载时很容易出现几百微秒甚至毫秒级调度延迟，对运动控制来说是不可接受的。</p>
 <h3 id="锁内存（mlockall）"><a href="#锁内存（mlockall）" class="headerlink" title="锁内存（mlockall）"></a>锁内存（<code>mlockall</code>）</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">mlockall(MCL_CURRENT | MCL_FUTURE);</span><br></pre></td></tr></table></figure>
-
 <p>这个操作把当前进程的所有内存页都锁定在物理内存中，不允许被操作系统换出到磁盘（swap）。</p>
 <p>原因很简单：普通情况下 Linux 虚拟内存管理会把长时间未访问的页换出到 swap，程序再次访问时会触发<strong>缺页中断（page fault）</strong>，可能耗费几百微秒到几毫秒。对实时线程来说，这个延迟是灾难性的。锁内存就是提前把所有页钉死在物理 RAM 里，彻底杜绝这种不确定延迟。</p>
 <h3 id="绑定-CPU（CPU-Affinity）"><a href="#绑定-CPU（CPU-Affinity）" class="headerlink" title="绑定 CPU（CPU Affinity）"></a>绑定 CPU（CPU Affinity）</h3><p>把实时线程固定到某个特定 CPU 核心上跑，好处是：</p>
@@ -251,29 +245,24 @@
 <hr>
 <h2 id="四、基于-SOEM-的启动流程"><a href="#四、基于-SOEM-的启动流程" class="headerlink" title="四、基于 SOEM 的启动流程"></a>四、基于 SOEM 的启动流程</h2><h3 id="整体线程结构"><a href="#整体线程结构" class="headerlink" title="整体线程结构"></a>整体线程结构</h3><p>从 SOEM 主站程序结构看，整个系统一般拆成三部分：主线程负责初始化和状态切换，实时线程负责周期性 PDO 收发与控制，监控线程负责监测 WKC、掉线和错误恢复。</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line">main()</span><br><span class="line"> └── 创建线程</span><br><span class="line"> └── bringup_network() 初始化 EtherCAT</span><br><span class="line">       ├── ecx_init()</span><br><span class="line">       ├── ecx_config_init()      --&gt; PRE-OP</span><br><span class="line">       ├── ecx_configdc()         --&gt; 配置分布式时钟</span><br><span class="line">       ├── ecx_dcsync0()          --&gt; 配置 Sync0</span><br><span class="line">       ├── ecx_config_map_group() --&gt; PDO 映射</span><br><span class="line">       ├── wait_for_sync_lock()   --&gt; PRE-OP 内等待 DC 锁定</span><br><span class="line">       ├── 切 SAFE-OP</span><br><span class="line">       ├── wait_safe_op_stability()</span><br><span class="line">       ├── 切 OP</span><br><span class="line">       └── dorun = 1              --&gt; 实时循环开始</span><br><span class="line"></span><br><span class="line">ecatthread()                         ecatcheck()</span><br><span class="line"> ├── 循环：                           └── 监测 WKC 与从站掉线，自动恢复</span><br><span class="line"> │     ├── 记录 jitter</span><br><span class="line"> │     ├── 接收 PDO</span><br><span class="line"> │     ├── csp_application_step()</span><br><span class="line"> │     ├── DC 相位误差修正 ec_sync()</span><br><span class="line"> │     └── 发送 PDO</span><br><span class="line"> └── (直到 Ctrl+C)</span><br><span class="line"></span><br><span class="line">shutdown_network()</span><br><span class="line"> └── OP → SAFE-OP → INIT → ecx_close()</span><br></pre></td></tr></table></figure>
-
 <h3 id="逐步走一遍"><a href="#逐步走一遍" class="headerlink" title="逐步走一遍"></a>逐步走一遍</h3><p><strong>物理上电</strong>：从站刚上电时，内部 DC 硬件时钟就已经开始计数，但还没有同步。Sync0 没有被配置，不会产生同步脉冲，<code>0x6040 = 0</code>。时钟在走，但只是”自己走自己的”。</p>
 <p><strong><code>ecx_init()</code></strong>：打开网卡，建立 EtherCAT 主站接口。主站具备了开始工作的通道，但还没进入完整配置流程。</p>
 <p><strong><code>ecx_config_init()</code> → 进入 PRE-OP</strong>：扫描从站并让从站进入 PRE-OP。这时 PDO 还没有完成映射，DC 还没有同步，不能进行业务 PDO 循环。PRE-OP 是”配置准备阶段”，大部分重要的准备动作都在这里完成。</p>
 <p><strong><code>ecx_configdc()</code> → 配置 DC</strong>：告诉从站要启用 DC 体系了。它确认从站是否具备 DC 能力、激活 DC 相关寄存器访问、建立主站参考时间与从站 DC 时间之间的同步基础。需要注意：<strong>这一步并不依赖 PDO</strong>，DC 的初始配置是通过 ESC 寄存器和报文时间戳完成的。先配置 DC，再配置 Sync0，这个顺序不能搞反。</p>
 <p><strong><code>ecx_dcsync0()</code> → 配置 Sync0</strong>：给每个从站配置 Sync0 参数：</p>
 <figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">ecx_dcsync0(context, slave, TRUE, <span class="number">1000000</span>, <span class="number">0</span>);</span><br><span class="line"><span class="comment">// 开启 Sync0，周期 1ms，相位偏移 0</span></span><br></pre></td></tr></table></figure>
-
 <p>在 PRE-OP 配置了 Sync0，不代表它已经进入业务控制意义上的正式输出状态。真正稳定周期运行，要等到后续 OP 状态、PDO 通道生效并且 DC 已锁定之后。</p>
-<p><strong><code>ecx_config_map_group()</code> → PDO 映射</strong>：分配 I&#x2F;O Map 和 PDO 区域，根据扫描结果确定 PDO 的内存布局，把原始 PDO 区域映射到程序定义的结构体指针上。从这一刻起，主站程序才真正知道”输入区和输出区在哪、每个字段怎么读写”，后面实时线程才能按结构体方式操作 PDO 数据。</p>
+<p><strong><code>ecx_config_map_group()</code> → PDO 映射</strong>：分配 I/O Map 和 PDO 区域，根据扫描结果确定 PDO 的内存布局，把原始 PDO 区域映射到程序定义的结构体指针上。从这一刻起，主站程序才真正知道”输入区和输出区在哪、每个字段怎么读写”，后面实时线程才能按结构体方式操作 PDO 数据。</p>
 <p><strong>在 PRE-OP 内等待 DC 锁定</strong>：很多问题不是出在”有没有配置 DC”，而是出在”有没有等它真正锁住”。工程里通常写一个等待函数：</p>
 <figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">wait_for_sync_lock()</span><br></pre></td></tr></table></figure>
-
 <p>典型的判定思路：偏差阈值 <code>DC_LOCK_TOLERANCE_NS</code>，连续满足 <code>DC_LOCK_REQUIRED_CYCLES = 3000</code> 个周期，超时 <code>DC_LOCK_TIMEOUT_MS = 5000</code>（5 秒）。这一步完成，才能认为从站 DC 时钟和主站参考时间真正对齐了。</p>
 <p><strong>切 SAFE-OP</strong>：PDO 输入有效，PDO 输出无效。主站能读从站数据，但还不能真正下发控制输出。这个阶段用来确认 PDO 映射、输入链路、DC 状态是否都正常，再观察一段时间（检查 WKC 稳定、DC 锁定持续成立），才切 OP。</p>
 <p><strong>切 OP</strong>：PDO 数据通道完全生效，Sync0 正式由 DC 时钟驱动，可以开始执行 CSP 等模式配置，可以做实际运动控制。OP 是一个分界点：前面所有动作属于”准备系统能跑起来”，到了 OP 才是”系统真正开始跑”。</p>
 <p>用状态机角度看整个流程：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line">┌─────────────────────────────────────────┐</span><br><span class="line">│ INIT                                    │</span><br><span class="line">│  - 清 DC / 身份验证                     │</span><br><span class="line">└─────────────────────────────────────────┘</span><br><span class="line">                 ↓</span><br><span class="line">┌─────────────────────────────────────────┐</span><br><span class="line">│ PRE-OP（最关键）                        │</span><br><span class="line">│  - 配置 SM / FMMU                       │</span><br><span class="line">│  - 配置 DC 时基、Sync0                  │</span><br><span class="line">│  - DC 初次对表（offset）                │</span><br><span class="line">│  - PDO 映射 / 等待 DC 锁定              │</span><br><span class="line">└─────────────────────────────────────────┘</span><br><span class="line">                 ↓</span><br><span class="line">┌─────────────────────────────────────────┐</span><br><span class="line">│ SAFE-OP                                 │</span><br><span class="line">│  - 检查 PDO 映射 / 确认 DC 锁定         │</span><br><span class="line">└─────────────────────────────────────────┘</span><br><span class="line">                 ↓</span><br><span class="line">┌─────────────────────────────────────────┐</span><br><span class="line">│ OP                                      │</span><br><span class="line">│  - 开启 PDO 循环                        │</span><br><span class="line">│  - 持续 DC drift 调整（运行期）         │</span><br><span class="line">└─────────────────────────────────────────┘</span><br></pre></td></tr></table></figure>
-
 <hr>
 <h2 id="五、运行期控制循环"><a href="#五、运行期控制循环" class="headerlink" title="五、运行期控制循环"></a>五、运行期控制循环</h2><h3 id="实时线程在干什么"><a href="#实时线程在干什么" class="headerlink" title="实时线程在干什么"></a>实时线程在干什么</h3><p>进入 OP 以后，实时线程按固定周期（比如 1ms）运行：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">接收 PDO → 读取 DCtime → 做相位修正 → 执行控制算法 / 轨迹规划 → 发送 PDO</span><br></pre></td></tr></table></figure>
-
 <p><code>ecx_receive_processdata()</code> 这一步不只是接收输入 PDO，它还会让从站 ESC 通过 EtherCAT 报文提供 DC 时间信息，SOEM 解析后写到 <code>ctx.DCtime</code>。</p>
 <p>有了 <code>ctx.DCtime</code>，主站就可以通过 <code>ec_sync()</code> 修正自己下一次发送的节拍，让发送节奏持续贴着 EtherCAT 网络的 DC 时间走。这一步对周期抖动控制非常关键。</p>
 <p>应用层控制逻辑（<code>csp_application_step()</code>）里可能包括：目标位置更新、插补、轨迹规划、模式切换、CiA402 状态控制、限幅和安全检查。在人形机器人场景下，还可能有多关节协调运动规划、重心平衡控制、步态生成、动力学补偿等。</p>
@@ -282,7 +271,6 @@
 <p><strong>Drift</strong> 是运行过程中时钟继续慢慢漂移的部分。原因包括温度变化、晶振特性、硬件误差、长时间运行积累的微小偏移。即便已经做过一次 offset 对齐，后面也还是会偏。<code>ec_sync()</code> 不是一次性的，它每个周期都在微调主站的发送时间点，抵消 drift，保持长期同步。</p>
 <h3 id="CiA402-状态机"><a href="#CiA402-状态机" class="headerlink" title="CiA402 状态机"></a>CiA402 状态机</h3><p>进入 OP、PDO 输出真正生效以后，还要按 <strong>CiA402</strong> 顺序驱动电机进入可运行状态，向 <code>0x6040</code> 依次写入：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">6 → 7 → 15</span><br></pre></td></tr></table></figure>
-
 <p>顺序不对或切换太快，都会导致明明 EtherCAT 网络正常但电机就是不使能。</p>
 <h3 id="监控线程"><a href="#监控线程" class="headerlink" title="监控线程"></a>监控线程</h3><p>监控线程主要看三类东西：</p>
 <p><strong>WKC（工作计数器）</strong>：由从站硬件自动累加，近似等于 <code>所有从站输出数 + 所有从站输入数</code>。WKC 明显低于预期，一般说明链路或从站状态出了问题。</p>
@@ -293,16 +281,15 @@
 <p>这里说的”主从通信”，不是 EtherCAT 物理总线上的协议主从，而是上层应用和 EtherCAT 主站程序之间的数据交换方式。在人形机器人场景下，这个分层很常见：上层算法层（运动规划、步态生成、视觉反馈等）→ EtherCAT 主站层（实时周期控制、PDO 收发）→ 从站驱动器层。</p>
 <h3 id="UDP"><a href="#UDP" class="headerlink" title="UDP"></a>UDP</h3><p>把 EtherCAT 主站程序单独做成一个服务进程，上层通过 UDP 和它通信：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">上层应用 / UI / 算法进程</span><br><span class="line">        ↓↑  UDP</span><br><span class="line">EtherCAT 主站进程（SOEM）</span><br><span class="line">        ↓↑  EtherCAT</span><br><span class="line">   EtherCAT 从站</span><br></pre></td></tr></table></figure>
-
 <p><strong>优点</strong>：结构清晰，模块边界明确；天然跨进程、跨机器；发送线程 + 接收线程就能搭起来。</p>
 <p><strong>缺点</strong>：不保证可靠送达，应用层必须自己做带序号、时间戳、超时保护的机制；实时性受网络栈影响，不等于硬实时。UDP 适合做参数下发、目标值下发、状态上报等非强实时指令，而不是直接作为 1ms 周期闭环控制的通道本身。</p>
 <h3 id="共享内存"><a href="#共享内存" class="headerlink" title="共享内存"></a>共享内存</h3><p>共享内存适用于同一台机器上的多个进程之间交换数据：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">上层应用进程</span><br><span class="line">      ↓↑  共享内存</span><br><span class="line">EtherCAT 主站进程（SOEM）</span><br><span class="line">      ↓↑  EtherCAT</span><br><span class="line"> EtherCAT 从站</span><br></pre></td></tr></table></figure>
-
 <p>上层把目标位置、使能命令写到共享内存，主站实时线程每周期读取，再把当前位置、状态字、错误码写回，上层随时读取。</p>
 <p><strong>优点</strong>：本质上是同一块内存的读写，没有网络协议栈开销，速度快、延迟低，适合同机高频数据交换。</p>
 <p><strong>缺点</strong>：只能用于同机进程间；同步问题要自己处理，通常需要设计锁、无锁环形缓冲区、双缓冲、版本号或时间戳机制，否则容易出现半包数据或状态不一致；调试门槛稍高，出问题时难以从外部直接抓包定位。</p>
-<h3 id="怎么选"><a href="#怎么选" class="headerlink" title="怎么选"></a>怎么选</h3><table>
+<h3 id="怎么选"><a href="#怎么选" class="headerlink" title="怎么选"></a>怎么选</h3><div class="table-container">
+<table>
 <thead>
 <tr>
 <th></th>
@@ -310,7 +297,8 @@
 <th>共享内存</th>
 </tr>
 </thead>
-<tbody><tr>
+<tbody>
+<tr>
 <td>适用范围</td>
 <td>跨机器、跨进程</td>
 <td>同机进程间</td>
@@ -330,17 +318,21 @@
 <td>可抓包</td>
 <td>靠日志和状态标志</td>
 </tr>
-</tbody></table>
+</tbody>
+</table>
+</div>
 <p>很实际的工程思路是两种都用：<strong>共享内存</strong>给本机高频控制通道，<strong>UDP</strong>给上位机、远端监控、参数配置和日志回传。在我的人形机器人项目里就是这么做的：本地算法层和 EtherCAT 主站用共享内存高速交换控制指令，上位机监控和调试工具通过 UDP 远程连接。</p>
 <hr>
-<h2 id="关键结论速查"><a href="#关键结论速查" class="headerlink" title="关键结论速查"></a>关键结论速查</h2><table>
+<h2 id="关键结论速查"><a href="#关键结论速查" class="headerlink" title="关键结论速查"></a>关键结论速查</h2><div class="table-container">
+<table>
 <thead>
 <tr>
 <th>#</th>
 <th>结论</th>
 </tr>
 </thead>
-<tbody><tr>
+<tbody>
+<tr>
 <td>1</td>
 <td>DC 时钟在从站上电后就运行，但未同步</td>
 </tr>
@@ -380,7 +372,9 @@
 <td>10</td>
 <td>UDP 适合服务化接口和跨机器通信；共享内存适合同机高频低延迟</td>
 </tr>
-</tbody></table>
+</tbody>
+</table>
+</div>
 <hr>
 <h2 id="写在最后"><a href="#写在最后" class="headerlink" title="写在最后"></a>写在最后</h2><p>这篇文章到这里就结束了，也算是把 EtherCAT 实时控制流程时的思路和踩坑经验系统地串了一遍。从三环控制到 DC 时钟同步，从状态机切换到运行期 drift 修正，再到上层通信方式的选择，这些东西单独看可能都很好理解，但真正串起来做工程时，很多细节就容易搞混。</p>
 <p>特别是在人形机器人这种多自由度、强实时、多层级控制的场景下，任何一个环节出问题，都可能导致整机抖动、失步甚至失控。</p>
