@@ -1,0 +1,824 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1.0,viewport-fit=cover"><title>双足机器人执行器网络（Actuator Network）真机数据采集与建模 | Xi Zeng's Blog</title><meta name="author" content="Xi Zeng"><meta name="copyright" content="Xi Zeng"><meta name="format-detection" content="telephone=no"><meta name="theme-color" content="#ffffff"><meta name="description" content="介绍一套面向双足人形机器人的执行器网络真机系统辨识与数据采集流程，通过神经网络替代理想化执行器模型，缩小 Sim-to-Real Gap。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="双足机器人执行器网络（Actuator Network）真机数据采集与建模">
+<meta property="og:url" content="https://cherishxi.xyz/2026/04/01/act-network/index.html">
+<meta property="og:site_name" content="Xi Zeng&#39;s Blog">
+<meta property="og:description" content="介绍一套面向双足人形机器人的执行器网络真机系统辨识与数据采集流程，通过神经网络替代理想化执行器模型，缩小 Sim-to-Real Gap。">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://cherishxi.xyz/img/photo.JPG">
+<meta property="article:published_time" content="2026-03-31T20:34:12.000Z">
+<meta property="article:modified_time" content="2026-04-08T20:41:22.286Z">
+<meta property="article:author" content="Xi Zeng">
+<meta property="article:tag" content="Sim-to-Real">
+<meta property="article:tag" content="强化学习">
+<meta property="article:tag" content="机器人">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://cherishxi.xyz/img/photo.JPG"><script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "双足机器人执行器网络（Actuator Network）真机数据采集与建模",
+  "url": "https://cherishxi.xyz/2026/04/01/act-network/",
+  "image": "https://cherishxi.xyz/img/photo.JPG",
+  "datePublished": "2026-03-31T20:34:12.000Z",
+  "dateModified": "2026-04-08T20:41:22.286Z",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "Xi Zeng",
+      "url": "https://cherishxi.xyz"
+    }
+  ]
+}</script><link rel="shortcut icon" href="/img/logo.JPG"><link rel="canonical" href="https://cherishxi.xyz/2026/04/01/act-network/index.html"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><link rel="stylesheet" href="/css/index.css?v=5.5.4"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.1.0/css/all.min.css"><script>
+    (() => {
+      
+    const saveToLocal = {
+      set: (key, value, ttl) => {
+        if (!ttl) return
+        const expiry = Date.now() + ttl * 86400000
+        localStorage.setItem(key, JSON.stringify({ value, expiry }))
+      },
+      get: key => {
+        const itemStr = localStorage.getItem(key)
+        if (!itemStr) return undefined
+        const { value, expiry } = JSON.parse(itemStr)
+        if (Date.now() > expiry) {
+          localStorage.removeItem(key)
+          return undefined
+        }
+        return value
+      }
+    }
+
+    window.btf = {
+      saveToLocal,
+      getScript: (url, attr = {}) => new Promise((resolve, reject) => {
+        const script = document.createElement('script')
+        script.src = url
+        script.async = true
+        Object.entries(attr).forEach(([key, val]) => script.setAttribute(key, val))
+        script.onload = script.onreadystatechange = () => {
+          if (!script.readyState || /loaded|complete/.test(script.readyState)) resolve()
+        }
+        script.onerror = reject
+        document.head.appendChild(script)
+      }),
+      getCSS: (url, id) => new Promise((resolve, reject) => {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = url
+        if (id) link.id = id
+        link.onload = link.onreadystatechange = () => {
+          if (!link.readyState || /loaded|complete/.test(link.readyState)) resolve()
+        }
+        link.onerror = reject
+        document.head.appendChild(link)
+      }),
+      addGlobalFn: (key, fn, name = false, parent = window) => {
+        if (!true && key.startsWith('pjax')) return
+        const globalFn = parent.globalFn || {}
+        globalFn[key] = globalFn[key] || {}
+        globalFn[key][name || Object.keys(globalFn[key]).length] = fn
+        parent.globalFn = globalFn
+      }
+    }
+  
+      
+      const activateDarkMode = () => {
+        document.documentElement.setAttribute('data-theme', 'dark')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d0d0d')
+        }
+      }
+      const activateLightMode = () => {
+        document.documentElement.setAttribute('data-theme', 'light')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
+        }
+      }
+
+      btf.activateDarkMode = activateDarkMode
+      btf.activateLightMode = activateLightMode
+
+      const theme = saveToLocal.get('theme')
+    
+          theme === 'dark' ? activateDarkMode() : theme === 'light' ? activateLightMode() : null
+        
+      
+      const asideStatus = saveToLocal.get('aside-status')
+      if (asideStatus !== undefined) {
+        document.documentElement.classList.toggle('hide-aside', asideStatus === 'hide')
+      }
+    
+      
+    const detectApple = () => {
+      if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent)) {
+        document.documentElement.classList.add('apple')
+      }
+    }
+    detectApple()
+  
+    })()
+  </script><script>const GLOBAL_CONFIG = {
+  root: '/',
+  algolia: undefined,
+  localSearch: undefined,
+  translate: {"defaultEncoding":2,"translateDelay":0,"msgToTraditionalChinese":"繁","msgToSimplifiedChinese":"簡"},
+  highlight: {"plugin":"highlight.js","highlightCopy":true,"highlightLang":true,"highlightHeightLimit":false,"highlightFullpage":false,"highlightMacStyle":false},
+  copy: {
+    success: '复制成功',
+    error: '复制失败',
+    noSupport: '浏览器不支持'
+  },
+  relativeDate: {
+    homepage: false,
+    post: false
+  },
+  runtime: '',
+  dateSuffix: {
+    just: '刚刚',
+    min: '分钟前',
+    hour: '小时前',
+    day: '天前',
+    month: '个月前'
+  },
+  copyright: undefined,
+  lightbox: 'null',
+  Snackbar: undefined,
+  infinitegrid: {
+    js: 'https://cdn.jsdelivr.net/npm/@egjs/infinitegrid@4.13.0/dist/infinitegrid.min.js',
+    buttonText: '加载更多'
+  },
+  isPhotoFigcaption: false,
+  islazyloadPlugin: false,
+  isAnchor: false,
+  percent: {
+    toc: true,
+    rightside: true,
+  },
+  autoDarkmode: false
+}</script><script id="config-diff">var GLOBAL_CONFIG_SITE = {
+  title: '双足机器人执行器网络（Actuator Network）真机数据采集与建模',
+  isHighlightShrink: false,
+  isToc: true,
+  pageType: 'post'
+}</script><style>.aplayer.aplayer-fixed{opacity:0.08 !important;transition:opacity 0.4s ease !important;} .aplayer.aplayer-fixed:hover{opacity:1 !important;}</style><style>#web_bg::after{content:'';position:fixed;inset:0;background:rgba(8,8,22,0.5);pointer-events:none;z-index:0;} #footer{background-color:#574E91 !important;} #page-header:not(.full_page){background:transparent !important;} .recent-post-item,.card-widget{background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border:1px solid transparent !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;color:#1a1a2e !important;transition:transform 0.3s ease,box-shadow 0.3s ease !important;background-clip:padding-box !important;outline:1.5px solid transparent;position:relative;} .recent-post-item::before,.card-widget::before{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;} .recent-post-item:hover,.card-widget:hover{transform:translateY(-4px) !important;box-shadow:0 12px 36px rgba(80,120,255,0.25) !important;} .recent-post-item a,.card-widget a{color:#3a5a8a !important;} .recent-post-item .article-meta,.card-widget .article-meta{color:#555 !important;}</style><style>.type-tags #page{background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;padding:60px 50px !important;position:relative;overflow:hidden} .type-tags #page::before{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-tags .tag-cloud-list{padding:10px 0;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:12px} .type-tags .tag-cloud-list a{font-size:1.05em !important;padding:10px 24px !important;border-radius:30px !important;margin:0 !important;font-weight:700 !important;letter-spacing:0.06em !important;text-shadow:0 1px 3px rgba(0,0,0,0.18) !important;transition:transform 0.25s,box-shadow 0.25s !important} .type-tags .tag-cloud-list a:hover{transform:translateY(-4px) scale(1.08) !important;box-shadow:0 10px 28px rgba(0,0,0,0.28) !important;filter:brightness(1.1)} .type-tags .tag-cloud-item.tag-color-0{background:linear-gradient(135deg,#4a90d9,#357abd) !important;box-shadow:0 4px 14px rgba(74,144,217,0.45) !important} .type-tags .tag-cloud-item.tag-color-1{background:linear-gradient(135deg,#7c4dbd,#5e35b1) !important;box-shadow:0 4px 14px rgba(124,77,189,0.45) !important} .type-tags .tag-cloud-item.tag-color-2{background:linear-gradient(135deg,#2eb88a,#1a9970) !important;box-shadow:0 4px 14px rgba(46,184,138,0.45) !important} .type-tags .tag-cloud-item.tag-color-3{background:linear-gradient(135deg,#e06c75,#c0392b) !important;box-shadow:0 4px 14px rgba(224,108,117,0.45) !important} .type-tags .tag-cloud-item.tag-color-4{background:linear-gradient(135deg,#d4954a,#b8732a) !important;box-shadow:0 4px 14px rgba(212,149,74,0.45) !important} .type-tags .tag-cloud-item.tag-color-5{background:linear-gradient(135deg,#5b8dee,#3a6fd8) !important;box-shadow:0 4px 14px rgba(91,141,238,0.45) !important} .type-tags .tag-cloud-item.tag-color-6{background:linear-gradient(135deg,#c96db5,#a84d99) !important;box-shadow:0 4px 14px rgba(201,109,181,0.45) !important} .type-tags .tag-cloud-item.tag-color-7{background:linear-gradient(135deg,#3aacb8,#228b96) !important;box-shadow:0 4px 14px rgba(58,172,184,0.45) !important}</style><style>.type-categories #page{background:transparent !important;backdrop-filter:none !important;box-shadow:none !important;border:none !important;padding:0 !important} .type-categories #page::before{display:none} .type-categories .category-lists{padding:0} .type-categories .category-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:20px} .type-categories .category-list>.category-list-item{width:100%;max-width:100%;list-style:none;background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border:1px solid transparent !important;background-clip:padding-box !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;padding:28px 28px 20px !important;position:relative;transition:transform 0.3s ease,box-shadow 0.3s ease !important;color:#1a1a2e !important} .type-categories .category-list>.category-list-item::before{display:none !important} .type-categories .category-list>.category-list-item::after{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-categories .category-list-child .category-list-item::before{display:none !important} .type-categories .category-list>.category-list-item:hover{transform:translateY(-4px) !important;box-shadow:0 12px 36px rgba(80,120,255,0.25) !important} .type-categories .category-list>.category-list-item>.category-list-link{display:block;font-size:1.25em;font-weight:800;color:#1a1a2e !important;letter-spacing:0.04em;margin-bottom:6px} .type-categories .category-list>.category-list-item>.category-list-link:hover{color:#4a90d9 !important} .type-categories .category-list>.category-list-item>.category-list-count{display:block;font-size:0.82em;color:#888 !important;font-weight:400;margin-bottom:16px} .type-categories .category-list>.category-list-item>.category-list-count::before{content:'共 '} .type-categories .category-list>.category-list-item>.category-list-count::after{content:' 篇'} .type-categories .category-list-child{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px} .type-categories .category-list-child .category-list-item{flex:0 0 auto;list-style:none} .type-categories .category-list-child .category-list-link{display:inline-block;padding:8px 20px;border-radius:24px;background:linear-gradient(135deg,rgba(91,141,238,0.15),rgba(124,77,189,0.12));color:#3a5a8a !important;font-size:1.05em;font-weight:700;border:1.5px solid rgba(91,141,238,0.3);transition:all 0.2s} .type-categories .category-list-child .category-list-link:hover{background:linear-gradient(135deg,#5b8dee,#7c4dbd) !important;color:#fff !important;border-color:transparent;transform:translateY(-2px);box-shadow:0 4px 12px rgba(91,141,238,0.35)} .type-categories .category-list-child .category-list-count{display:none}</style><style>.type-about #web_bg{display:none !important;} body.type-about{background:url('/img/dream.JPG') center center / cover no-repeat fixed !important;} .type-about #page{background:rgba(10,10,30,0.65) !important;backdrop-filter:blur(18px) !important;-webkit-backdrop-filter:blur(18px) !important;border-radius:16px !important;box-shadow:0 6px 32px rgba(0,0,0,0.6) !important;padding:60px 50px !important;position:relative;overflow:hidden;color:#e8eaf6 !important} .type-about #page::before{content:'';position:absolute;inset:0;border-radius:16px;padding:2px;background:linear-gradient(135deg,rgba(160,120,255,0.7),rgba(80,160,255,0.5),rgba(140,100,255,0.6));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-about #page h2{color:#c8b4ff !important;font-size:1.6em !important;} .type-about #page p,.type-about #page li{color:#d0d8f0 !important;font-size:1.12em !important;line-height:1.9 !important;} .type-about #page strong{color:#b0c8ff !important;} .type-about #page a{color:#90caf9 !important;}</style><style>.type-link #page{background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;padding:60px 50px !important;position:relative;overflow:hidden} .type-link #page::before{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-link .flink-list-item{position:relative;background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border:1px solid transparent !important;background-clip:padding-box !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;transition:transform 0.3s ease,box-shadow 0.3s ease !important;overflow:visible !important} .type-link .flink-list-item::after{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-link .flink-list-item:hover{transform:translateY(-4px) !important;box-shadow:0 12px 36px rgba(80,120,255,0.25) !important}</style><meta name="generator" content="Hexo 8.1.1"></head><body><div class="bg-animation" id="web_bg" style="background-image: url(/img/background.JPG);"></div><div id="sidebar"><div id="menu-mask"></div><div id="sidebar-menus"><div class="avatar-img text-center"><img src="/img/photo.JPG" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="site-data text-center"><a href="/archives/"><div class="headline">文章</div><div class="length-num">8</div></a><a href="/tags/"><div class="headline">主题</div><div class="length-num">10</div></a><a href="/categories/"><div class="headline">专栏</div><div class="length-num">9</div></a></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 主页</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 专栏</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 主题</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-user"></i><span> 关于</span></a></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友情链接</span></a></div></div></div></div><div class="post" id="body-wrap"><header class="post-bg" id="page-header"><nav id="nav"><span id="blog-info"><a class="nav-site-title" href="/"><img class="site-icon" src="/img/logo.JPG" alt="Logo"><span class="site-name">Xi Zeng's Blog</span></a><a class="nav-page-title" href="/"><span class="site-name">双足机器人执行器网络（Actuator Network）真机数据采集与建模</span><span class="site-name"><i class="fa-solid fa-circle-arrow-left"></i><span>  返回首页</span></span></a></span><div id="menus"><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 主页</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 专栏</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 主题</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-user"></i><span> 关于</span></a></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友情链接</span></a></div></div><div id="toggle-menu"><span class="site-page"><i class="fas fa-bars fa-fw"></i></span></div></div></nav><div id="post-info"><h1 class="post-title">双足机器人执行器网络（Actuator Network）真机数据采集与建模</h1><div id="post-meta"><div class="meta-firstline"><span class="post-meta-date"><i class="far fa-calendar-alt fa-fw post-meta-icon"></i><span class="post-meta-label">发表于</span><time class="post-meta-date-created" datetime="2026-03-31T20:34:12.000Z" title="发表于 2026-04-01 04:34:12">2026-04-01</time><span class="post-meta-separator">|</span><i class="fas fa-history fa-fw post-meta-icon"></i><span class="post-meta-label">更新于</span><time class="post-meta-date-updated" datetime="2026-04-08T20:41:22.286Z" title="更新于 2026-04-09 04:41:22">2026-04-09</time></span><span class="post-meta-categories"><span class="post-meta-separator">|</span><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/%E5%B7%A5%E7%A8%8B%E5%AE%9E%E8%B7%B5/">工程实践</a><i class="fas fa-angle-right post-meta-separator"></i><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/%E5%B7%A5%E7%A8%8B%E5%AE%9E%E8%B7%B5/%E7%B3%BB%E7%BB%9F%E8%BE%A8%E8%AF%86/">系统辨识</a></span></div><div class="meta-secondline"><span class="post-meta-separator">|</span><span class="post-meta-wordcount"><i class="far fa-file-word fa-fw post-meta-icon"></i><span class="post-meta-label">总字数:</span><span class="word-count">4.9k</span><span class="post-meta-separator">|</span><i class="far fa-clock fa-fw post-meta-icon"></i><span class="post-meta-label">阅读时长:</span><span>17分钟</span></span><span class="post-meta-separator">|</span><span class="post-meta-pv-cv" id="" data-flag-title=""><i class="far fa-eye fa-fw post-meta-icon"></i><span class="post-meta-label">浏览量:</span><span id="busuanzi_value_page_pv"><i class="fa-solid fa-spinner fa-spin"></i></span></span></div></div></div></header><main class="layout" id="content-inner"><div id="post"><article class="container post-content" id="article-container"><h2 id="摘要"><a href="#摘要" class="headerlink" title="摘要"></a>摘要</h2><p>在将强化学习策略部署到真实机器人硬件的过程中，仿真与现实之间的差距（sim-to-real gap）是制约迁移效果的核心瓶颈之一。其中，执行器（关节电机）的非线性动力学特性——包括摩擦、延迟、弹性形变，齿间间隙等是仿真模型最难精确刻画的部分。本文介绍了一套面向双足人形机器人的<strong>执行器网络（Actuator Network）真机系统辨识与数据采集流程</strong>，旨在通过采集真实关节响应数据，训练一个神经网络来替代传统的理想化执行器模型，从而在仿真中更真实地还原电机行为，缩小 sim-to-real gap。</p>
+<blockquote>
+<p><strong>注：</strong> <em>本篇 blog 持续更新中。当前方法的可靠性尚未经过充分验证，部分结论可能随实验推进而修正或完善，仅供参考。</em></p>
+</blockquote>
+<hr>
+<h2 id="一、背景与动机"><a href="#一、背景与动机" class="headerlink" title="一、背景与动机"></a>一、背景与动机</h2><h3 id="1-1-Sim-to-Real-Gap-问题"><a href="#1-1-Sim-to-Real-Gap-问题" class="headerlink" title="1.1 Sim-to-Real Gap 问题"></a>1.1 Sim-to-Real Gap 问题</h3><p>基于强化学习的运动控制策略通常在仿真环境（如 MuJoCo、Isaac Gym）中训练，然后直接迁移到真实机器人上。然而，仿真器默认使用的执行器模型过于理想化：</p>
+<ul>
+<li><strong>无延迟</strong>：命令立刻生效，而真实电机控制环有通信延迟和计算延迟（通常 1-3 个控制周期）。</li>
+<li><strong>无摩擦</strong>：仿真关节不考虑齿轮摩擦、轴承摩擦，而真实电机的摩擦力矩非线性且依赖速度方向。</li>
+<li><strong>线性力矩-位置关系</strong>：仿真中 PD 控制器输出扭矩 <script type="math/tex">\tau = K_p(q_d - q) + K_d(\dot{q}_d - \dot{q})</script>，但真实电机受饱和、温升、反电动势等影响，这一关系并不线性。</li>
+</ul>
+<p>这些差异导致策略在真机上表现可能并不稳定，尤其是面对复杂的任务时。</p>
+<h3 id="1-2-Actuator-Network-方案"><a href="#1-2-Actuator-Network-方案" class="headerlink" title="1.2 Actuator Network 方案"></a>1.2 Actuator Network 方案</h3><p>解决思路是<strong>用神经网络来学习真实执行器的动力学模型</strong>。训练好的 Actuator Network 在仿真中替代简单 PD 控制器，使仿真行为更接近真实机器人，从而提升策略迁移成功率。</p>
+<p>Actuator Network 的基本形式为：</p>
+<script type="math/tex; mode=display">\tau_{output} = f_{\theta}(q_d, q, \dot{q}, K_p, K_d, \tau_{prev}, \ldots)</script><p>其中 <script type="math/tex">f_{\theta}</script> 是待训练的神经网络，输入为关节状态和控制指令，输出为实际输出力矩（或对 PD 输出的残差修正，类似论文ASAP中的方法）。</p>
+<h3 id="1-3-目标机器人：X2-双足人形机器人"><a href="#1-3-目标机器人：X2-双足人形机器人" class="headerlink" title="1.3 目标机器人：X2 双足人形机器人"></a>1.3 目标机器人：X2 双足人形机器人</h3><p>本项目基于 <strong>X2 双足人形机器人</strong>，腿部共有 <strong>12 个自由度</strong>：</p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>侧</th>
+<th>关节名</th>
+<th>关节类型</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Left</td>
+<td><code>left_hip_yaw_joint</code></td>
+<td>髋偏航</td>
+</tr>
+<tr>
+<td>Left</td>
+<td><code>left_hip_roll_joint</code></td>
+<td>髋横滚</td>
+</tr>
+<tr>
+<td>Left</td>
+<td><code>left_hip_pitch_joint</code></td>
+<td>髋俯仰</td>
+</tr>
+<tr>
+<td>Left</td>
+<td><code>left_knee_joint</code></td>
+<td>膝关节</td>
+</tr>
+<tr>
+<td>Left</td>
+<td><code>left_ankle_pitch_joint</code></td>
+<td>踝俯仰</td>
+</tr>
+<tr>
+<td>Left</td>
+<td><code>left_ankle_roll_joint</code></td>
+<td>踝横滚</td>
+</tr>
+<tr>
+<td>Right</td>
+<td><code>right_hip_yaw_joint</code></td>
+<td>髋偏航</td>
+</tr>
+<tr>
+<td>Right</td>
+<td><code>right_hip_roll_joint</code></td>
+<td>髋横滚</td>
+</tr>
+<tr>
+<td>Right</td>
+<td><code>right_hip_pitch_joint</code></td>
+<td>髋俯仰</td>
+</tr>
+<tr>
+<td>Right</td>
+<td><code>right_knee_joint</code></td>
+<td>膝关节</td>
+</tr>
+<tr>
+<td>Right</td>
+<td><code>right_ankle_pitch_joint</code></td>
+<td>踝俯仰</td>
+</tr>
+<tr>
+<td>Right</td>
+<td><code>right_ankle_roll_joint</code></td>
+<td>踝横滚</td>
+</tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="二、数据采集方案设计"><a href="#二、数据采集方案设计" class="headerlink" title="二、数据采集方案设计"></a>二、数据采集方案设计</h2><h3 id="2-1-单关节逐个激励策略"><a href="#2-1-单关节逐个激励策略" class="headerlink" title="2.1 单关节逐个激励策略"></a>2.1 单关节逐个激励策略</h3><p>系统辨识最关键的设计决策是<strong>如何施加激励信号</strong>。我们采用<strong>单关节逐个激励（Single-Joint Sequential Excitation）</strong>方案：每次仅激励一个关节，其余关节保持零位（或安全姿态），逐一对 12 个关节进行系统辨识。</p>
+<p><strong>选择这一方案的原因：</strong></p>
+<ol>
+<li><strong>避免多关节耦合干扰</strong>：同时激励多个关节时，关节间的力学耦合（尤其是足底接触力的变化）会影响每个关节的实际输出力矩，使得辨识到的模型掺入了耦合效应，而非单纯的执行器特性。</li>
+<li><strong>安全性可控</strong>：机器人处于悬挂或支撑状态，单关节运动幅度有限，便于人工监控。</li>
+<li><strong>数据标注清晰</strong>：每段数据明确对应某一关节的某一激励条件，后处理简单。</li>
+</ol>
+<h3 id="2-2-多频域正弦激励"><a href="#2-2-多频域正弦激励" class="headerlink" title="2.2 多频域正弦激励"></a>2.2 多频域正弦激励</h3><p>激励信号选用<strong>正弦轨迹</strong>，原因如下：</p>
+<ul>
+<li>频谱成分明确，便于分析频域特性；</li>
+<li>幅值和频率可精确控制；</li>
+<li>关节位移连续可微，避免阶跃指令对电机造成冲击。</li>
+</ul>
+<p>我们设计了<strong>渐进式多频域激励方案</strong>：频率范围从 0.1 Hz 起步，以 0.05 Hz 为步进逐步增加至 1 Hz，共覆盖 19 个频率点，对应激励周期从 10 s 到 1 s：</p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>频率范围</th>
+<th>对应周期范围</th>
+<th>动态特性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>0.1 Hz – 0.2 Hz</strong></td>
+<td><strong>5 s – 10 s</strong></td>
+<td>准静态低频区，考察低速摩擦与弹性形变特性</td>
+</tr>
+<tr>
+<td><strong>0.25 Hz – 0.5 Hz</strong></td>
+<td><strong>2 s – 4 s</strong></td>
+<td>中频区，覆盖正常行走步频（~0.3–0.5 Hz）</td>
+</tr>
+<tr>
+<td><strong>0.5 Hz – 1.0 Hz</strong></td>
+<td><strong>1 s – 2 s</strong></td>
+<td>高频区，考察电机动态响应延迟与带宽极限</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>渐进式采集的优势：</strong></p>
+<ol>
+<li><strong>系统性覆盖</strong>：均匀分布的频率点避免了特定频段的盲区，使训练数据的频域覆盖更完整；</li>
+<li><strong>频率依赖效应可见</strong>：通过逐步扫频可以清晰观察到误差随频率单调增大的趋势，便于定位电机带宽边界；</li>
+<li><strong>低频先行</strong>：从低频开始采集，电机运动缓慢，操作人员有充足时间观察关节状态，确认安全后再逐步提高频率。</li>
+</ol>
+<p>每个关节在每个频率点下采集至少 3 个完整正弦周期的数据，确保稳态响应被充分记录。</p>
+<h3 id="2-3-基于-Soft-Limit-的自适应幅值策略"><a href="#2-3-基于-Soft-Limit-的自适应幅值策略" class="headerlink" title="2.3 基于 Soft Limit 的自适应幅值策略"></a>2.3 基于 Soft Limit 的自适应幅值策略</h3><p>不同关节的运动范围差异显著（例如髋俯仰关节范围远大于髋偏航关节）。若使用固定幅值，小范围关节可能超限，大范围关节则激励不充分。</p>
+<p>我们设计了<strong>基于 soft limit 的相对幅值策略</strong>：</p>
+<p><strong>Step 1：从 URDF 读取关节原始限位</strong></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># get_limit.py</span></span><br><span class="line">SOFT_RATIO = <span class="number">0.9</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">compute_soft_limits</span>(<span class="params">lower: <span class="built_in">float</span>, upper: <span class="built_in">float</span>, soft_ratio: <span class="built_in">float</span> = <span class="number">0.9</span></span>):</span><br><span class="line">    center = <span class="number">0.5</span> * (lower + upper)</span><br><span class="line">    half_range = <span class="number">0.5</span> * (upper - lower)</span><br><span class="line">    soft_half_range = soft_ratio * half_range</span><br><span class="line">    soft_lower = center - soft_half_range</span><br><span class="line">    soft_upper = center + soft_half_range</span><br><span class="line">    <span class="keyword">return</span> soft_lower, soft_upper</span><br></pre></td></tr></table></figure>
+<p>首先将 URDF 中的硬限位（hard limit）缩小 10%（即 <code>soft_ratio = 0.9</code>），得到 soft limit，为关节提供一层安全缓冲。</p>
+<p><strong>Step 2：基于 soft limit 计算激励幅值</strong></p>
+<p>激励幅值按 soft limit 可用范围的比例计算：</p>
+<script type="math/tex; mode=display">A = \alpha \times \frac{q_{soft\_upper} - q_{soft\_lower}}{2}</script><p>我们采用<strong>渐进式幅值扫描</strong>方案：幅值比例 <script type="math/tex">\alpha</script> 从 10% 起步，以 10% 为步进逐步增加至 100%（即完整 soft limit 范围），共 10 档：</p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>幅值档位</th>
+<th><script type="math/tex">\alpha</script></th>
+<th>特性描述</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>10% – 30%</td>
+<td>0.10 – 0.30</td>
+<td>小幅线性区，近似线性摩擦，适合辨识弹性刚度</td>
+</tr>
+<tr>
+<td>40% – 60%</td>
+<td>0.40 – 0.60</td>
+<td>中等幅值，覆盖正常行走时的典型关节摆动范围</td>
+</tr>
+<tr>
+<td>70% – 90%</td>
+<td>0.70 – 0.90</td>
+<td>大幅非线性区，摩擦非线性显著，激励边界动力学</td>
+</tr>
+<tr>
+<td>100%</td>
+<td>1.00</td>
+<td>全幅值，覆盖 soft limit 全范围，测试极端工况响应</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>渐进式幅值扫描的优势：</strong></p>
+<ul>
+<li>从小幅值开始，确认电机响应正常后再增大激励，降低真机测试风险；</li>
+<li>系统性地采集从线性区到非线性区的过渡特性，使 actuator network 能学习完整的非线性映射；</li>
+<li>每个幅值档位与频率维度组合，形成 10 × 19 = 190 种激励条件的二维网格，充分覆盖工作空间。</li>
+</ul>
+<p>以 <code>left_hip_pitch_joint</code> 为例（假设 URDF 限位为 [-0.8, 1.2] rad）：</p>
+<script type="math/tex; mode=display">q_{center} = \frac{-0.8 + 1.2}{2} = 0.2 \text{ rad}</script><script type="math/tex; mode=display">q_{soft\_half\_range} = 0.9 \times \frac{1.2 - (-0.8)}{2} = 0.9 \text{ rad}</script><script type="math/tex; mode=display">A_{10\%} = 0.10 \times 0.9 = 0.09 \text{ rad}, \quad A_{50\%} = 0.50 \times 0.9 = 0.45 \text{ rad}, \quad A_{100\%} = 1.00 \times 0.9 = 0.9 \text{ rad}</script><p>激励轨迹为：</p>
+<script type="math/tex; mode=display">q_{desired}(t) = q_{center} + A \cdot \sin\left(\frac{2\pi}{T} t\right)</script><p>这一策略保证了不同关节数据覆盖的一致性，同时自动适应各关节的物理约束。在全幅值（100%）条件下，soft limit 裁剪机制仍作为最后一道防线保障安全。</p>
+<h3 id="2-4-采集数据字段"><a href="#2-4-采集数据字段" class="headerlink" title="2.4 采集数据字段"></a>2.4 采集数据字段</h3><p>每个控制周期（通常 500 Hz 或 1 kHz）记录以下字段：</p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>字段名</th>
+<th>含义</th>
+<th>单位</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>timestamp</code></td>
+<td>时间戳</td>
+<td>s</td>
+</tr>
+<tr>
+<td><code>joint_name</code></td>
+<td>关节名称</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>desired_position</code></td>
+<td>目标位置 <script type="math/tex">q_d</script></td>
+<td>rad</td>
+</tr>
+<tr>
+<td><code>actual_position</code></td>
+<td>实际位置 <script type="math/tex">q</script></td>
+<td>rad</td>
+</tr>
+<tr>
+<td><code>actual_velocity</code></td>
+<td>实际速度 <script type="math/tex">\dot{q}</script></td>
+<td>rad/s</td>
+</tr>
+<tr>
+<td><code>actual_effort</code></td>
+<td>实际输出力矩 <script type="math/tex">\tau</script></td>
+<td>Nm</td>
+</tr>
+<tr>
+<td><code>kp</code></td>
+<td>位置增益 <script type="math/tex">K_p</script></td>
+<td>Nm/rad</td>
+</tr>
+<tr>
+<td><code>kd</code></td>
+<td>阻尼增益 <script type="math/tex">K_d</script></td>
+<td>Nm·s/rad</td>
+</tr>
+<tr>
+<td><code>period</code></td>
+<td>激励周期</td>
+<td>s</td>
+</tr>
+<tr>
+<td><code>amplitude_ratio</code></td>
+<td>幅值比例</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>所有数据汇总为一个 CSV 文件（<code>actuator_data.csv</code>），格式如下：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">timestamp,joint_name,desired_position,actual_position,actual_velocity,actual_effort,kp,kd,period,amplitude_ratio</span><br><span class="line">1234567890.001,left_hip_pitch_joint,0.218,0.201,0.032,12.5,80.0,2.0,2.0,0.20</span><br><span class="line">1234567890.003,left_hip_pitch_joint,0.221,0.204,0.038,13.1,80.0,2.0,2.0,0.20</span><br><span class="line">...</span><br></pre></td></tr></table></figure>
+<hr>
+<h2 id="三、安全机制设计"><a href="#三、安全机制设计" class="headerlink" title="三、安全机制设计"></a>三、安全机制设计</h2><p>真机实验的首要原则是安全。我们将多层安全限制融入采集程序中：</p>
+<h3 id="3-1-位置限幅（Soft-Limit-Clipping）"><a href="#3-1-位置限幅（Soft-Limit-Clipping）" class="headerlink" title="3.1 位置限幅（Soft Limit Clipping）"></a>3.1 位置限幅（Soft Limit Clipping）</h3><p>在每次发送关节指令前，将目标位置裁剪到 soft limit 范围内：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">q_cmd = np.clip(q_desired, soft_lower[joint], soft_upper[joint])</span><br></pre></td></tr></table></figure>
+<p>即使激励信号因计算误差略微超出范围，也能保证实际指令安全。</p>
+<h3 id="3-2-最大力矩限制（Effort-Limit）"><a href="#3-2-最大力矩限制（Effort-Limit）" class="headerlink" title="3.2 最大力矩限制（Effort Limit）"></a>3.2 最大力矩限制（Effort Limit）</h3><p>从 URDF 读取每个关节的最大力矩 <code>effort_limit</code>，并在电机驱动器层面设置扭矩上限，防止电机过热或关节损坏：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">effort_limit = joint_limits[joint_name][<span class="string">&quot;effort&quot;</span>]  <span class="comment"># 从 URDF 读取</span></span><br><span class="line"><span class="comment"># 发送给驱动器的力矩命令不超过 effort_limit</span></span><br></pre></td></tr></table></figure>
+<h3 id="3-3-最大速度限制（Velocity-Limit）"><a href="#3-3-最大速度限制（Velocity-Limit）" class="headerlink" title="3.3 最大速度限制（Velocity Limit）"></a>3.3 最大速度限制（Velocity Limit）</h3><p>类似地，设置速度阈值。如果关节实测速度超过安全阈值（通常取 URDF velocity limit 的 80%），自动停止当前激励，切换到保持当前位置模式：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> <span class="built_in">abs</span>(actual_velocity) &gt; <span class="number">0.8</span> * velocity_limit[joint]:</span><br><span class="line">    emergency_stop()</span><br></pre></td></tr></table></figure>
+<h3 id="3-4-人工急停"><a href="#3-4-人工急停" class="headerlink" title="3.4 人工急停"></a>3.4 人工急停</h3><p>采集程序实现键盘急停（Ctrl+C 或专用按键），任何异常情况下可立即停止所有关节运动，恢复到零位姿态。</p>
+<hr>
+<h2 id="四、数据可视化与质量分析"><a href="#四、数据可视化与质量分析" class="headerlink" title="四、数据可视化与质量分析"></a>四、数据可视化与质量分析</h2><h3 id="4-1-单关节时序可视化"><a href="#4-1-单关节时序可视化" class="headerlink" title="4.1 单关节时序可视化"></a>4.1 单关节时序可视化</h3><p>采集完成后，对每个关节的时序数据进行四图联排可视化：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">plot_single_joint</span>(<span class="params">df, joint_name, outdir</span>):</span><br><span class="line">    <span class="comment"># 子图1：desired vs actual position</span></span><br><span class="line">    ax1.plot(t, joint_df[<span class="string">&quot;desired_position&quot;</span>], label=<span class="string">&quot;desired_position&quot;</span>)</span><br><span class="line">    ax1.plot(t, joint_df[<span class="string">&quot;actual_position&quot;</span>],  label=<span class="string">&quot;actual_position&quot;</span>)</span><br><span class="line"></span><br><span class="line">    <span class="comment"># 子图2：tracking error = desired - actual</span></span><br><span class="line">    ax2.plot(t, joint_df[<span class="string">&quot;error&quot;</span>])</span><br><span class="line"></span><br><span class="line">    <span class="comment"># 子图3：actual velocity</span></span><br><span class="line">    ax3.plot(t, joint_df[<span class="string">&quot;actual_velocity&quot;</span>])</span><br><span class="line"></span><br><span class="line">    <span class="comment"># 子图4：actual effort (torque)</span></span><br><span class="line">    ax4.plot(t, joint_df[<span class="string">&quot;actual_effort&quot;</span>])</span><br></pre></td></tr></table></figure>
+<p>四图联排能直观展示：</p>
+<ul>
+<li><strong>跟踪滞后</strong>：actual_position 与 desired_position 的相位差，体现电机延迟</li>
+<li><strong>跟踪误差</strong>：量化 PD 控制器的稳态和动态误差</li>
+<li><strong>速度响应</strong>：实际速度的幅值和相位</li>
+<li><strong>力矩饱和</strong>：力矩是否出现裁剪，反映激励幅值是否过大</li>
+</ul>
+<h3 id="4-2-跨关节统计对比"><a href="#4-2-跨关节统计对比" class="headerlink" title="4.2 跨关节统计对比"></a>4.2 跨关节统计对比</h3><p>对所有 12 个关节计算统计指标并绘制柱状图：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">stats = df.groupby(<span class="string">&quot;joint_name&quot;</span>).agg(</span><br><span class="line">    error_rms   = (<span class="string">&quot;error&quot;</span>,         <span class="keyword">lambda</span> x: (x**<span class="number">2</span>).mean()**<span class="number">0.5</span>),</span><br><span class="line">    effort_mean = (<span class="string">&quot;actual_effort&quot;</span>, <span class="keyword">lambda</span> x: x.<span class="built_in">abs</span>().mean()),</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+<p><strong>RMS 误差柱状图</strong>（<code>joint_error_rms.png</code>）帮助识别哪些关节的 PD 追踪效果最差，这些关节往往是 actuator network 建模收益最大的关节。</p>
+<p><strong>平均绝对力矩柱状图</strong>（<code>joint_effort_mean_abs.png</code>）反映各关节的负载水平，可以指导 PD 增益调整。</p>
+<h3 id="4-3-激励条件分析（Period-vs-Amplitude）"><a href="#4-3-激励条件分析（Period-vs-Amplitude）" class="headerlink" title="4.3 激励条件分析（Period vs. Amplitude）"></a>4.3 激励条件分析（Period vs. Amplitude）</h3><p>针对不同激励周期和幅值比例的组合，分析 RMS 误差的变化趋势：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">cond_stats = df.groupby([<span class="string">&quot;joint_name&quot;</span>, <span class="string">&quot;period&quot;</span>, <span class="string">&quot;amplitude_ratio&quot;</span>]).agg(</span><br><span class="line">    error_rms = (<span class="string">&quot;error&quot;</span>, <span class="keyword">lambda</span> x: (x**<span class="number">2</span>).mean()**<span class="number">0.5</span>),</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+<p>生成每个关节的”RMS Error vs Period”折线图（<code>{joint_name}_error_vs_period.png</code>），每条线对应一种幅值比例。</p>
+<p><strong>典型观察规律：</strong></p>
+<ul>
+<li>高频（1 Hz 周期）下 RMS 误差通常更大，因为电机动态响应跟不上快速变化的指令</li>
+<li>大幅值（100% ratio）的误差通常高于小幅值（10% ratio），反映非线性摩擦的影响</li>
+<li>踝关节（ankle）误差一般高于髋关节（hip），因为踝关节传动比更大、摩擦更显著</li>
+</ul>
+<hr>
+<h2 id="五、Actuator-Network-评估：PD-vs-NN"><a href="#五、Actuator-Network-评估：PD-vs-NN" class="headerlink" title="五、Actuator Network 评估：PD vs. NN"></a>五、Actuator Network 评估：PD vs. NN</h2><p>在模型训练完成后，需要在真机上评估 Actuator Network 相对于纯 PD 控制的提升效果。</p>
+<h3 id="5-1-评估指标"><a href="#5-1-评估指标" class="headerlink" title="5.1 评估指标"></a>5.1 评估指标</h3><p>对每个关节计算三项指标：</p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>指标</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>RMSE</strong></td>
+<td>Root Mean Square Error（均方根误差），综合反映跟踪精度</td>
+</tr>
+<tr>
+<td><strong>MAE</strong></td>
+<td>Mean Absolute Error（平均绝对误差），对异常值不敏感</td>
+</tr>
+<tr>
+<td><strong>R²</strong></td>
+<td>决定系数，反映模型拟合质量（越接近 1 越好）</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3 id="5-2-评估结果（Locomotion-like-激励）"><a href="#5-2-评估结果（Locomotion-like-激励）" class="headerlink" title="5.2 评估结果（Locomotion-like 激励）"></a>5.2 评估结果（Locomotion-like 激励）</h3><p>评估方法为：在真机上执行真实行走轨迹激励（哪怕是乱动的情况），同步记录真实关节力矩作为 ground truth，然后分别用 PD 模型和 Actuator Network 对相同输入进行力矩预测，计算各自与真机力矩的误差。</p>
+<p>以下是 12 个腿部关节的对比结果（误差单位：Nm）：</p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>关节</th>
+<th>PD RMSE</th>
+<th>PD MAE</th>
+<th>PD R²</th>
+<th>NN RMSE</th>
+<th>NN MAE</th>
+<th>NN R²</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>left_ankle_pitch</td>
+<td>0.470</td>
+<td>0.359</td>
+<td>0.314</td>
+<td><strong>0.221</strong></td>
+<td><strong>0.097</strong></td>
+<td><strong>0.848</strong></td>
+</tr>
+<tr>
+<td>left_ankle_roll</td>
+<td>0.179</td>
+<td>0.142</td>
+<td>0.571</td>
+<td><strong>0.058</strong></td>
+<td><strong>0.045</strong></td>
+<td><strong>0.956</strong></td>
+</tr>
+<tr>
+<td>left_hip_pitch</td>
+<td>5.739</td>
+<td>4.603</td>
+<td>0.816</td>
+<td><strong>0.926</strong></td>
+<td><strong>0.543</strong></td>
+<td><strong>0.995</strong></td>
+</tr>
+<tr>
+<td>left_hip_roll</td>
+<td>0.283</td>
+<td>0.226</td>
+<td>0.957</td>
+<td><strong>0.216</strong></td>
+<td><strong>0.174</strong></td>
+<td><strong>0.975</strong></td>
+</tr>
+<tr>
+<td>left_hip_yaw</td>
+<td>3.848</td>
+<td>3.049</td>
+<td>-6.807</td>
+<td><strong>0.588</strong></td>
+<td><strong>0.365</strong></td>
+<td><strong>0.817</strong></td>
+</tr>
+<tr>
+<td>left_knee</td>
+<td>1.428</td>
+<td>1.131</td>
+<td>0.295</td>
+<td><strong>0.327</strong></td>
+<td><strong>0.242</strong></td>
+<td><strong>0.963</strong></td>
+</tr>
+<tr>
+<td>right_ankle_pitch</td>
+<td>0.400</td>
+<td>0.322</td>
+<td>0.424</td>
+<td><strong>0.109</strong></td>
+<td><strong>0.084</strong></td>
+<td><strong>0.958</strong></td>
+</tr>
+<tr>
+<td>right_ankle_roll</td>
+<td>0.179</td>
+<td>0.144</td>
+<td>0.794</td>
+<td><strong>0.073</strong></td>
+<td><strong>0.057</strong></td>
+<td><strong>0.966</strong></td>
+</tr>
+<tr>
+<td>right_hip_pitch</td>
+<td>5.451</td>
+<td>4.419</td>
+<td>0.837</td>
+<td><strong>0.601</strong></td>
+<td><strong>0.393</strong></td>
+<td><strong>0.998</strong></td>
+</tr>
+<tr>
+<td>right_hip_roll</td>
+<td>0.259</td>
+<td>0.209</td>
+<td>0.960</td>
+<td><strong>0.157</strong></td>
+<td><strong>0.128</strong></td>
+<td><strong>0.985</strong></td>
+</tr>
+<tr>
+<td>right_hip_yaw</td>
+<td>3.537</td>
+<td>2.848</td>
+<td>-7.960</td>
+<td><strong>0.378</strong></td>
+<td><strong>0.266</strong></td>
+<td><strong>0.898</strong></td>
+</tr>
+<tr>
+<td>right_knee</td>
+<td>1.285</td>
+<td>1.039</td>
+<td>0.398</td>
+<td><strong>0.254</strong></td>
+<td><strong>0.198</strong></td>
+<td><strong>0.977</strong></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>结果分析：</strong></p>
+<p>从数值上看，Actuator Network 在 <strong>全部 12 个关节</strong> 上的 RMSE、MAE 均显著低于纯 PD 模型，R² 也全面提升，部分关节提升幅度极为突出：</p>
+<ul>
+<li><strong>hip_pitch / hip_yaw</strong>：PD 的 R² 为负值（-6.8 / -8.0），说明纯 PD 模型在这两个关节上的预测甚至不如均值基线，而 NN 将 R² 提升至 0.82–0.90，RMSE 降低约 85%–90%，是改善最显著的关节。这两个关节的传动链摩擦和非线性特性较强，PD 的线性假设失效最为明显。</li>
+<li><strong>hip_roll / ankle</strong>：PD 已有较好基线（R² 0.57–0.96），NN 在此基础上进一步将 RMSE 降至不足 PD 的 1/3–1/2，R² 普遍达到 0.95 以上。</li>
+<li><strong>knee</strong>：PD R² 仅约 0.30–0.40，反映膝关节在运动中存在较大非线性；NN 将 R² 提升至 0.96–0.98，精度大幅改善。</li>
+</ul>
+<p>这一结果有力证明了 Actuator Network 方法的有效性：<strong>通过真机数据驱动建模，神经网络能够捕捉 PD 控制器无法描述的非线性摩擦、延迟和传动耦合效应</strong>，在力矩预测精度上全面超越理想 PD 模型。</p>
+<p>然而，<strong>在实际闭环部署中，策略层面的改善并不明显</strong>，这一现象值得深入理解：</p>
+<p><strong>原因一：X2 机器人的 PD 参数本身已经调校得较好</strong></p>
+<p>X2 的电机驱动器经过厂商仔细调优，PD 增益在正常行走范围内已能实现较小的跟踪误差。尽管力矩预测精度有显著提升，但在当前任务下这一差距未能转化为可观察的行走质量改善。这与文献中 actuator network 效果显著的场景（通常是 PD 效果较差、摩擦较大的低成本电机）存在本质差异。</p>
+<p><strong>原因二：测试任务的动力学复杂度相对有限</strong></p>
+<p>locomotion 实际任务中，激励信号可以认为是匀速、中等频率的周期运动，动态变化较为平稳。在这类任务中，线性 PD 控制器已能够较好地近似执行器的输入输出关系，actuator network 建模真实非线性动力学的优势难以体现。若任务包含急停、跳跃、应对外力扰动等高动态工况，非线性建模的收益预计会更为显著。</p>
+<p><strong>这不意味着 Actuator Network 没有价值</strong></p>
+<p>需要强调的是，上述局限性是<strong>与具体硬件平台和任务复杂度密切相关的</strong>，而非该方法本身的缺陷：</p>
+<ul>
+<li>对于摩擦更大、延迟更显著的执行器（如谐波减速器驱动的关节），actuator network 的建模优势将更加突出；</li>
+<li>对于高速跑步、侧向快速移步等高动态任务，PD 的线性假设表现会差一些，而 actuator network 能更好地捕捉非线性区间的行为；</li>
+<li>本项目建立的<strong>数据采集流程、安全机制、可视化分析工具</strong>本身具有通用性，可直接迁移到其他执行器或更复杂任务场景。</li>
+</ul>
+<p>因此，本工作的核心贡献不仅在于当前场景下的建模精度，更在于建立了一套<strong>可复用的真机系统辨识基础设施</strong>，为后续更复杂任务和不同硬件平台上的 actuator network 研究奠定了方法论基础。</p>
+<h3 id="5-3-可视化对比"><a href="#5-3-可视化对比" class="headerlink" title="5.3 可视化对比"></a>5.3 可视化对比</h3><p>对每个关节绘制 PD vs. NN 的力矩预测对比图（<code>{joint_name}_pd_nn_act.png</code>），X 轴为真实力矩，Y 轴为预测力矩，理想情况下所有点落在 y=x 对角线上。偏离对角线的区域揭示模型在哪些工况下预测不准确。</p>
+<hr>
+<h2 id="六、完整工作流程总结"><a href="#六、完整工作流程总结" class="headerlink" title="六、完整工作流程总结"></a>六、完整工作流程总结</h2><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br></pre></td><td class="code"><pre><span class="line">┌─────────────────────────────────────────────────────────────────┐</span><br><span class="line">│                    数据采集与建模完整流程                          │</span><br><span class="line">└─────────────────────────────────────────────────────────────────┘</span><br><span class="line"></span><br><span class="line">Step 1: 限位读取</span><br><span class="line">  └── get_limit.py</span><br><span class="line">      ├── 解析 URDF 获取每关节 [lower, upper, effort, velocity]</span><br><span class="line">      └── 计算 soft limit（原始范围 × 0.9）</span><br><span class="line"></span><br><span class="line">Step 2: 数据采集（ROS2 节点）</span><br><span class="line">  └── 对 12 个腿部关节逐一激励</span><br><span class="line">      ├── 激励信号：正弦波，频率 0.1 Hz – 1.0 Hz（步进 0.05 Hz，共 19 个频率点）</span><br><span class="line">      ├── 幅值：soft limit 可用范围的 10% – 100%（步进 10%，共 10 档）</span><br><span class="line">      ├── 安全机制：位置裁剪 + 力矩/速度限制 + 急停</span><br><span class="line">      └── 记录：timestamp, joint_name, desired_pos, actual_pos,</span><br><span class="line">               velocity, effort, kp, kd, period, amplitude_ratio</span><br><span class="line"></span><br><span class="line">Step 3: 数据可视化与质量检验</span><br><span class="line">  └── visualize_actuator_data.py</span><br><span class="line">      ├── 单关节时序图（4 子图）</span><br><span class="line">      ├── 跨关节 RMS 误差柱状图</span><br><span class="line">      ├── 跨关节平均力矩柱状图</span><br><span class="line">      └── 激励条件分析（period vs. error_rms）</span><br><span class="line"></span><br><span class="line">Step 4: Actuator Network 训练</span><br><span class="line">  └── 输入特征：[q_d, q, q̇, Kp, Kd, τ_prev, ...]</span><br><span class="line">  └── 输出：τ_actual（或 Δτ 残差）</span><br><span class="line">  └── 框架：PyTorch MLP / LSTM</span><br><span class="line"></span><br><span class="line">Step 5: 模型评估</span><br><span class="line">  └── 真机采集 locomotion-like 测试数据</span><br><span class="line">  └── 对比 PD vs. NN：RMSE / MAE / R²</span><br><span class="line">  └── 可视化散点图与时序对比图</span><br><span class="line"></span><br><span class="line">Step 6: 集成回仿真</span><br><span class="line">  └── 在 MuJoCo / Isaac Gym 中替换 PD 执行器为 Actuator Network</span><br><span class="line">  └── 重新训练运动策略</span><br><span class="line">  └── 评估 sim-to-real 迁移效果</span><br></pre></td></tr></table></figure>
+<hr>
+<h2 id="七、关键设计决策回顾"><a href="#七、关键设计决策回顾" class="headerlink" title="七、关键设计决策回顾"></a>七、关键设计决策回顾</h2><div class="table-container">
+<table>
+<thead>
+<tr>
+<th>设计选择</th>
+<th>备选方案</th>
+<th>选择理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>单关节逐一激励</td>
+<td>多关节同时激励</td>
+<td>避免关节间力学耦合污染数据</td>
+</tr>
+<tr>
+<td>正弦轨迹激励</td>
+<td>阶跃/随机激励</td>
+<td>频谱可控，连续可微，电机友好</td>
+</tr>
+<tr>
+<td>多频域激励（0.1–1.0 Hz，步进 0.05 Hz）</td>
+<td>固定单一频率</td>
+<td>均匀覆盖不同动态频段，暴露电机带宽边界</td>
+</tr>
+<tr>
+<td>渐进式幅值（10%–100%，步进 10%）</td>
+<td>固定单一幅值</td>
+<td>系统采集线性区到非线性区的完整过渡特性</td>
+</tr>
+<tr>
+<td>URDF 安全裁剪</td>
+<td>硬件层限制</td>
+<td>软件层额外保护，防止指令越界</td>
+</tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="八、后续工作方向"><a href="#八、后续工作方向" class="headerlink" title="八、后续工作方向"></a>八、后续工作方向</h2><ol>
+<li><strong>扩充训练数据分布</strong>：加入更接近真实行走轨迹的激励信号（如在实际的运行中采集到的关节轨迹），缩小 distribution shift。</li>
+<li><strong>时序模型</strong>：将 MLP 替换为 LSTM 或 Transformer，显式建模执行器的时序延迟特性。</li>
+</ol>
+<hr>
+<h2 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h2><ul>
+<li>Hwangbo, J. et al. “Learning Agile and Dynamic Motor Skills for Legged Robots.” <em>Science Robotics</em>, 2019.</li>
+<li>Kumar, V. et al. “RMA: Rapid Motor Adaptation for Legged Robots.” <em>RSS</em>, 2021.</li>
+</ul>
+</article><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta"><i class="fas fa-circle-user fa-fw"></i>文章作者: </span><span class="post-copyright-info"><a href="https://cherishxi.xyz">Xi Zeng</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta"><i class="fas fa-square-arrow-up-right fa-fw"></i>文章链接: </span><span class="post-copyright-info"><a href="https://cherishxi.xyz/2026/04/01/act-network/">https://cherishxi.xyz/2026/04/01/act-network/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta"><i class="fas fa-circle-exclamation fa-fw"></i>版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来源 <a href="https://cherishxi.xyz" target="_blank">Xi Zeng's Blog</a>！</span></div></div><div class="tag_share"><div class="post-meta__tag-list"><a class="post-meta__tags" href="/tags/%E5%BC%BA%E5%8C%96%E5%AD%A6%E4%B9%A0/">强化学习</a><a class="post-meta__tags" href="/tags/%E6%9C%BA%E5%99%A8%E4%BA%BA/">机器人</a><a class="post-meta__tags" href="/tags/Sim-to-Real/">Sim-to-Real</a></div><div class="post-share"><div class="social-share" data-image="/img/photo.JPG" data-sites="facebook,x,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/css/share.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/js/social-share.min.js" defer></script></div></div><nav class="pagination-post" id="pagination"><a class="pagination-related" href="/2026/04/08/sim-to-real/" title="双足机器人强化学习 Sim-to-Real 方法及细节实现"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info"><div class="info-1"><div class="info-item-1">上一篇</div><div class="info-item-2">双足机器人强化学习 Sim-to-Real 方法及细节实现</div></div><div class="info-2"><div class="info-item-1">从奖励设计、域随机化策略到真实部署，完整复盘双足机器人强化学习 Sim-to-Real 训练全流程。</div></div></div></a><a class="pagination-related" href="/2026/03/25/talk-1/" title="知见与边界：关于机器人系统中感知、理解与约束的碎思"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-right"><div class="info-1"><div class="info-item-1">下一篇</div><div class="info-item-2">知见与边界：关于机器人系统中感知、理解与约束的碎思</div></div><div class="info-2"><div class="info-item-1">关于机器人系统中感知边界、系统理解与约束表达的一些碎思。</div></div></div></a></nav><div class="relatedPosts"><div class="headline"><i class="fas fa-thumbs-up fa-fw"></i><span>相关推荐</span></div><div class="relatedPosts-list"><a class="pagination-related" href="/2026/04/08/sim-to-real/" title="双足机器人强化学习 Sim-to-Real 方法及细节实现"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-04-08</div><div class="info-item-2">双足机器人强化学习 Sim-to-Real 方法及细节实现</div></div><div class="info-2"><div class="info-item-1">从奖励设计、域随机化策略到真实部署，完整复盘双足机器人强化学习 Sim-to-Real 训练全流程。</div></div></div></a><a class="pagination-related" href="/2026/03/25/talk-1/" title="知见与边界：关于机器人系统中感知、理解与约束的碎思"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-03-25</div><div class="info-item-2">知见与边界：关于机器人系统中感知、理解与约束的碎思</div></div><div class="info-2"><div class="info-item-1">关于机器人系统中感知边界、系统理解与约束表达的一些碎思。</div></div></div></a><a class="pagination-related" href="/2026/03/09/kalman/" title="卡尔曼滤波：动态系统中的最优状态估计"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-03-09</div><div class="info-item-2">卡尔曼滤波：动态系统中的最优状态估计</div></div><div class="info-2"><div class="info-item-1">从双足机器人姿态估计出发，推导标量与向量卡尔曼滤波器，理解预测-更新循环与卡尔曼增益的直觉。</div></div></div></a><a class="pagination-related" href="/2026/03/18/gmr/" title="基于 GMR 框架的动捕数据重定向工作"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-03-18</div><div class="info-item-2">基于 GMR 框架的动捕数据重定向工作</div></div><div class="info-2"><div class="info-item-1">将动捕设备采集得到的人体动作数据重定向到机器人的目标骨架与关节空间中，从而完成从人体动作表示到机器人动作表示的映射与验证。纯小白跟着做也可以完成呀！</div></div></div></a></div></div></div><div class="aside-content" id="aside-content"><div class="card-widget card-info text-center"><div class="avatar-img"><img src="/img/photo.JPG" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="author-info-name">Xi Zeng</div><div class="author-info-description"></div><div class="site-data"><a href="/archives/"><div class="headline">文章</div><div class="length-num">8</div></a><a href="/tags/"><div class="headline">主题</div><div class="length-num">10</div></a><a href="/categories/"><div class="headline">专栏</div><div class="length-num">9</div></a></div><a id="card-info-btn" target="_blank" rel="noopener" href="https://github.com/Cherishings"><i class="fab fa-github"></i><span>Follow Me</span></a><div class="card-info-social-icons"><a class="social-icon" href="https://github.com/Cherishings" target="_blank" title="Github"><i class="fab fa-github" style="color: #24292e;"></i></a><a class="social-icon" href="mailto:504132714@qq.com" target="_blank" title="Email"><i class="fas fa-envelope" style="color: #4a7dbe;"></i></a></div></div><div class="card-widget card-announcement"><div class="item-headline"><i class="fas fa-bullhorn fa-shake"></i><span>公告</span></div><div class="announcement_content">纸质与电子档笔记持续整理中，更多分享即将出炉</div></div><div class="sticky_layout"><div class="card-widget" id="card-toc"><div class="item-headline"><i class="fas fa-stream"></i><span>目录</span><span class="toc-percentage"></span></div><div class="toc-content"><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%91%98%E8%A6%81"><span class="toc-text">摘要</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%80%E3%80%81%E8%83%8C%E6%99%AF%E4%B8%8E%E5%8A%A8%E6%9C%BA"><span class="toc-text">一、背景与动机</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-1-Sim-to-Real-Gap-%E9%97%AE%E9%A2%98"><span class="toc-text">1.1 Sim-to-Real Gap 问题</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#1-2-Actuator-Network-%E6%96%B9%E6%A1%88"><span class="toc-text">1.2 Actuator Network 方案</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#1-3-%E7%9B%AE%E6%A0%87%E6%9C%BA%E5%99%A8%E4%BA%BA%EF%BC%9AX2-%E5%8F%8C%E8%B6%B3%E4%BA%BA%E5%BD%A2%E6%9C%BA%E5%99%A8%E4%BA%BA"><span class="toc-text">1.3 目标机器人：X2 双足人形机器人</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BA%8C%E3%80%81%E6%95%B0%E6%8D%AE%E9%87%87%E9%9B%86%E6%96%B9%E6%A1%88%E8%AE%BE%E8%AE%A1"><span class="toc-text">二、数据采集方案设计</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#2-1-%E5%8D%95%E5%85%B3%E8%8A%82%E9%80%90%E4%B8%AA%E6%BF%80%E5%8A%B1%E7%AD%96%E7%95%A5"><span class="toc-text">2.1 单关节逐个激励策略</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-2-%E5%A4%9A%E9%A2%91%E5%9F%9F%E6%AD%A3%E5%BC%A6%E6%BF%80%E5%8A%B1"><span class="toc-text">2.2 多频域正弦激励</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-3-%E5%9F%BA%E4%BA%8E-Soft-Limit-%E7%9A%84%E8%87%AA%E9%80%82%E5%BA%94%E5%B9%85%E5%80%BC%E7%AD%96%E7%95%A5"><span class="toc-text">2.3 基于 Soft Limit 的自适应幅值策略</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-4-%E9%87%87%E9%9B%86%E6%95%B0%E6%8D%AE%E5%AD%97%E6%AE%B5"><span class="toc-text">2.4 采集数据字段</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%89%E3%80%81%E5%AE%89%E5%85%A8%E6%9C%BA%E5%88%B6%E8%AE%BE%E8%AE%A1"><span class="toc-text">三、安全机制设计</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#3-1-%E4%BD%8D%E7%BD%AE%E9%99%90%E5%B9%85%EF%BC%88Soft-Limit-Clipping%EF%BC%89"><span class="toc-text">3.1 位置限幅（Soft Limit Clipping）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-2-%E6%9C%80%E5%A4%A7%E5%8A%9B%E7%9F%A9%E9%99%90%E5%88%B6%EF%BC%88Effort-Limit%EF%BC%89"><span class="toc-text">3.2 最大力矩限制（Effort Limit）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-3-%E6%9C%80%E5%A4%A7%E9%80%9F%E5%BA%A6%E9%99%90%E5%88%B6%EF%BC%88Velocity-Limit%EF%BC%89"><span class="toc-text">3.3 最大速度限制（Velocity Limit）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-4-%E4%BA%BA%E5%B7%A5%E6%80%A5%E5%81%9C"><span class="toc-text">3.4 人工急停</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%9B%9B%E3%80%81%E6%95%B0%E6%8D%AE%E5%8F%AF%E8%A7%86%E5%8C%96%E4%B8%8E%E8%B4%A8%E9%87%8F%E5%88%86%E6%9E%90"><span class="toc-text">四、数据可视化与质量分析</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#4-1-%E5%8D%95%E5%85%B3%E8%8A%82%E6%97%B6%E5%BA%8F%E5%8F%AF%E8%A7%86%E5%8C%96"><span class="toc-text">4.1 单关节时序可视化</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-2-%E8%B7%A8%E5%85%B3%E8%8A%82%E7%BB%9F%E8%AE%A1%E5%AF%B9%E6%AF%94"><span class="toc-text">4.2 跨关节统计对比</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-3-%E6%BF%80%E5%8A%B1%E6%9D%A1%E4%BB%B6%E5%88%86%E6%9E%90%EF%BC%88Period-vs-Amplitude%EF%BC%89"><span class="toc-text">4.3 激励条件分析（Period vs. Amplitude）</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BA%94%E3%80%81Actuator-Network-%E8%AF%84%E4%BC%B0%EF%BC%9APD-vs-NN"><span class="toc-text">五、Actuator Network 评估：PD vs. NN</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#5-1-%E8%AF%84%E4%BC%B0%E6%8C%87%E6%A0%87"><span class="toc-text">5.1 评估指标</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-2-%E8%AF%84%E4%BC%B0%E7%BB%93%E6%9E%9C%EF%BC%88Locomotion-like-%E6%BF%80%E5%8A%B1%EF%BC%89"><span class="toc-text">5.2 评估结果（Locomotion-like 激励）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-3-%E5%8F%AF%E8%A7%86%E5%8C%96%E5%AF%B9%E6%AF%94"><span class="toc-text">5.3 可视化对比</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%AD%E3%80%81%E5%AE%8C%E6%95%B4%E5%B7%A5%E4%BD%9C%E6%B5%81%E7%A8%8B%E6%80%BB%E7%BB%93"><span class="toc-text">六、完整工作流程总结</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%83%E3%80%81%E5%85%B3%E9%94%AE%E8%AE%BE%E8%AE%A1%E5%86%B3%E7%AD%96%E5%9B%9E%E9%A1%BE"><span class="toc-text">七、关键设计决策回顾</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%AB%E3%80%81%E5%90%8E%E7%BB%AD%E5%B7%A5%E4%BD%9C%E6%96%B9%E5%90%91"><span class="toc-text">八、后续工作方向</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83"><span class="toc-text">参考</span></a></li></ol></div></div><div class="card-widget card-recent-post"><div class="item-headline"><i class="fas fa-history"></i><span>最新文章</span></div><div class="aside-list"><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/04/08/sim-to-real/" title="双足机器人强化学习 Sim-to-Real 方法及细节实现">双足机器人强化学习 Sim-to-Real 方法及细节实现</a><time datetime="2026-04-08T14:51:21.000Z" title="发表于 2026-04-08 22:51:21">2026-04-08</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/04/01/act-network/" title="双足机器人执行器网络（Actuator Network）真机数据采集与建模">双足机器人执行器网络（Actuator Network）真机数据采集与建模</a><time datetime="2026-03-31T20:34:12.000Z" title="发表于 2026-04-01 04:34:12">2026-04-01</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/03/25/talk-1/" title="知见与边界：关于机器人系统中感知、理解与约束的碎思">知见与边界：关于机器人系统中感知、理解与约束的碎思</a><time datetime="2026-03-25T15:12:12.000Z" title="发表于 2026-03-25 23:12:12">2026-03-25</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/03/18/gmr/" title="基于 GMR 框架的动捕数据重定向工作">基于 GMR 框架的动捕数据重定向工作</a><time datetime="2026-03-17T16:23:50.000Z" title="发表于 2026-03-18 00:23:50">2026-03-18</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/03/15/Dockerplus/" title="基于已有的Dockerfile用 Docker 搭建 ROS2 开发环境">基于已有的Dockerfile用 Docker 搭建 ROS2 开发环境</a><time datetime="2026-03-14T16:18:20.000Z" title="发表于 2026-03-15 00:18:20">2026-03-15</time></div></div></div></div></div></div></main><footer id="footer"><div class="footer-other"><div class="footer-copyright"><span class="copyright">&copy;&nbsp;2026 By Xi Zeng</span></div><div class="footer_custom_text">在这一隅角落，获得知识与灵魂的心安之所<br>Find in this little corner a place of peace for knowledge and the soul.</div></div></footer></div><div id="rightside"><div id="rightside-config-hide"><button id="readmode" type="button" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="translateLink" type="button" title="简繁转换">繁</button><button id="darkmode" type="button" title="日间和夜间模式切换"><i class="fas fa-adjust"></i></button><button id="hide-aside-btn" type="button" title="单栏和双栏切换"><i class="fas fa-arrows-alt-h"></i></button></div><div id="rightside-config-show"><button id="rightside-config" type="button" title="设置"><i class="fas fa-cog fa-spin"></i></button><button class="close" id="mobile-toc-button" type="button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" type="button" title="回到顶部"><span class="scroll-percent"></span><i class="fas fa-arrow-up"></i></button></div></div><div><script src="/js/utils.js?v=5.5.4"></script><script src="/js/main.js?v=5.5.4"></script><script src="/js/tw_cn.js?v=5.5.4"></script><div class="js-pjax"><script>(() => {
+  const loadMathjax = () => {
+    if (!window.MathJax) {
+      window.MathJax = {
+        loader: {
+          load: [
+            // Four font extension packages (optional)
+            //- '[tex]/bbm',
+            //- '[tex]/bboldx',
+            //- '[tex]/dsfont',
+            '[tex]/mhchem'
+          ],
+          paths: {
+            'mathjax-newcm': '[mathjax]/../@mathjax/mathjax-newcm-font',
+
+            //- // Four font extension packages (optional)
+            //- 'mathjax-bbm-extension': '[mathjax]/../@mathjax/mathjax-bbm-font-extension',
+            //- 'mathjax-bboldx-extension': '[mathjax]/../@mathjax/mathjax-bboldx-font-extension',
+            //- 'mathjax-dsfont-extension': '[mathjax]/../@mathjax/mathjax-dsfont-font-extension',
+            'mathjax-mhchem-extension': '[mathjax]/../@mathjax/mathjax-mhchem-font-extension'
+          }
+        },
+        output: {
+          font: 'mathjax-newcm',
+        },
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          tags: 'none',
+          packages: {
+            '[+]': [
+              'mhchem'
+            ]
+          }
+        },
+        chtml: {
+          scale: 1.1
+        },
+        options: {
+          enableMenu: true,
+          menuOptions: {
+            settings: {
+              enrich: false  // Turn off Braille and voice narration text automatic generation
+            }
+          },
+          renderActions: {
+            findScript: [10, doc => {
+              for (const node of document.querySelectorAll('script[type^="math/tex"]')) {
+                const display = !!node.type.match(/; *mode=display/)
+                const math = new doc.options.MathItem(node.textContent, doc.inputJax[0], display)
+                const text = document.createTextNode('')
+                node.parentNode.replaceChild(text, node)
+                math.start = {node: text, delim: '', n: 0}
+                math.end = {node: text, delim: '', n: 0}
+                doc.math.push(math)
+              }
+            }, '']
+          }
+        }
+      }
+
+      const script = document.createElement('script')
+      script.src = 'https://cdn.jsdelivr.net/npm/mathjax@4.1.0/tex-mml-chtml.min.js'
+      script.id = 'MathJax-script'
+      script.async = true
+      document.head.appendChild(script)
+    } else {
+      MathJax.startup.document.state(0)
+      MathJax.texReset()
+      MathJax.typesetPromise()
+    }
+  }
+
+  btf.addGlobalFn('encrypt', loadMathjax, 'mathjax')
+  window.pjax ? loadMathjax() : window.addEventListener('load', loadMathjax)
+})()</script></div><div class="aplayer no-destroy" data-id="2166217715" data-server="netease" data-type="song" data-fixed="true" data-mini="true" data-listFolded="false" data-order="random" data-lrctype="1" data-preload="none" data-autoplay="false" muted></div><canvas class="fireworks" mobile="false"></canvas><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/dist/fireworks.min.js"></script><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.js"></script><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/metingjs/dist/Meting.min.js"></script><script>(() => {
+  const destroyAplayer = () => {
+    if (window.aplayers) {
+      for (let i = 0; i < window.aplayers.length; i++) {
+        if (!window.aplayers[i].options.fixed) {
+          window.aplayers[i].destroy()
+        }
+      }
+    }
+  }
+
+  const runMetingJS = () => {
+    typeof loadMeting === 'function' && document.getElementsByClassName('aplayer').length && loadMeting()
+  }
+
+  btf.addGlobalFn('pjaxSend', destroyAplayer, 'destroyAplayer')
+  btf.addGlobalFn('pjaxComplete', loadMeting, 'runMetingJS')
+})()</script><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js" defer="defer"></script><script>document.addEventListener('DOMContentLoaded', () => {
+  const pjaxSelectors = ["head > title","#config-diff","#body-wrap","#rightside-config-hide","#rightside-config-show",".js-pjax"]
+
+  window.pjax = new Pjax({
+    elements: 'a:not([target="_blank"])',
+    selectors: pjaxSelectors,
+    cacheBust: false,
+    analytics: false,
+    scrollRestoration: false
+  })
+
+  const triggerPjaxFn = (val) => {
+    if (!val) return
+    Object.values(val).forEach(fn => {
+      try {
+        fn()
+      } catch (err) {
+        console.debug('Pjax callback failed:', err)
+      }
+    })
+  }
+
+  document.addEventListener('pjax:send', () => {
+    // removeEventListener
+    btf.removeGlobalFnEvent('pjaxSendOnce')
+    btf.removeGlobalFnEvent('themeChange')
+
+    // reset readmode
+    const $bodyClassList = document.body.classList
+    if ($bodyClassList.contains('read-mode')) $bodyClassList.remove('read-mode')
+
+    triggerPjaxFn(window.globalFn.pjaxSend)
+  })
+
+  document.addEventListener('pjax:complete', () => {
+    btf.removeGlobalFnEvent('pjaxCompleteOnce')
+    document.querySelectorAll('script[data-pjax]').forEach(item => {
+      const newScript = document.createElement('script')
+      const content = item.text || item.textContent || item.innerHTML || ""
+      Array.from(item.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value))
+      newScript.appendChild(document.createTextNode(content))
+      item.parentNode.replaceChild(newScript, item)
+    })
+
+    triggerPjaxFn(window.globalFn.pjaxComplete)
+  })
+
+  document.addEventListener('pjax:error', e => {
+    if (e.request.status === 404) {
+      false
+        ? pjax.loadUrl('/404.html')
+        : window.location.href = e.request.responseURL
+    }
+  })
+})</script><script async data-pjax src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script></div></body></html>
