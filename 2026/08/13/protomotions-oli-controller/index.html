@@ -1,0 +1,571 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1.0,viewport-fit=cover"><title>基于 ProtoMotions 的全身控制器训练与部署 | Xi Zeng's Blog</title><meta name="author" content="Xi Zeng"><meta name="copyright" content="Xi Zeng"><meta name="format-detection" content="telephone=no"><meta name="theme-color" content="#ffffff"><meta name="description" content="围绕一套 31 自由度全身跟踪控制器，拆解动作重采样、前瞻参考、非对称观测、PPO 奖励与 L2C2 正则，计算动作到力矩的增益，并检查策略导出和部署接口的一致性。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="基于 ProtoMotions 的全身控制器训练与部署">
+<meta property="og:url" content="https://cherishxi.xyz/2026/08/13/protomotions-oli-controller/index.html">
+<meta property="og:site_name" content="Xi Zeng&#39;s Blog">
+<meta property="og:description" content="围绕一套 31 自由度全身跟踪控制器，拆解动作重采样、前瞻参考、非对称观测、PPO 奖励与 L2C2 正则，计算动作到力矩的增益，并检查策略导出和部署接口的一致性。">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://cherishxi.xyz/img/photo.JPG">
+<meta property="article:published_time" content="2026-08-13T13:07:26.000Z">
+<meta property="article:modified_time" content="2026-10-27T16:00:00.000Z">
+<meta property="article:author" content="Xi Zeng">
+<meta property="article:tag" content="ProtoMotions">
+<meta property="article:tag" content="Sim2Real">
+<meta property="article:tag" content="全身控制">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://cherishxi.xyz/img/photo.JPG"><script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "基于 ProtoMotions 的全身控制器训练与部署",
+  "url": "https://cherishxi.xyz/2026/08/13/protomotions-oli-controller/",
+  "image": "https://cherishxi.xyz/img/photo.JPG",
+  "datePublished": "2026-08-13T13:07:26.000Z",
+  "dateModified": "2026-10-27T16:00:00.000Z",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "Xi Zeng",
+      "url": "https://cherishxi.xyz"
+    }
+  ]
+}</script><link rel="shortcut icon" href="/img/logo.JPG"><link rel="canonical" href="https://cherishxi.xyz/2026/08/13/protomotions-oli-controller/index.html"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><link rel="stylesheet" href="/css/index.css?v=5.5.4"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.1.0/css/all.min.css"><script>
+    (() => {
+      
+    const saveToLocal = {
+      set: (key, value, ttl) => {
+        if (!ttl) return
+        const expiry = Date.now() + ttl * 86400000
+        localStorage.setItem(key, JSON.stringify({ value, expiry }))
+      },
+      get: key => {
+        const itemStr = localStorage.getItem(key)
+        if (!itemStr) return undefined
+        const { value, expiry } = JSON.parse(itemStr)
+        if (Date.now() > expiry) {
+          localStorage.removeItem(key)
+          return undefined
+        }
+        return value
+      }
+    }
+
+    window.btf = {
+      saveToLocal,
+      getScript: (url, attr = {}) => new Promise((resolve, reject) => {
+        const script = document.createElement('script')
+        script.src = url
+        script.async = true
+        Object.entries(attr).forEach(([key, val]) => script.setAttribute(key, val))
+        script.onload = script.onreadystatechange = () => {
+          if (!script.readyState || /loaded|complete/.test(script.readyState)) resolve()
+        }
+        script.onerror = reject
+        document.head.appendChild(script)
+      }),
+      getCSS: (url, id) => new Promise((resolve, reject) => {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = url
+        if (id) link.id = id
+        link.onload = link.onreadystatechange = () => {
+          if (!link.readyState || /loaded|complete/.test(link.readyState)) resolve()
+        }
+        link.onerror = reject
+        document.head.appendChild(link)
+      }),
+      addGlobalFn: (key, fn, name = false, parent = window) => {
+        if (!true && key.startsWith('pjax')) return
+        const globalFn = parent.globalFn || {}
+        globalFn[key] = globalFn[key] || {}
+        globalFn[key][name || Object.keys(globalFn[key]).length] = fn
+        parent.globalFn = globalFn
+      }
+    }
+  
+      
+      const activateDarkMode = () => {
+        document.documentElement.setAttribute('data-theme', 'dark')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d0d0d')
+        }
+      }
+      const activateLightMode = () => {
+        document.documentElement.setAttribute('data-theme', 'light')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
+        }
+      }
+
+      btf.activateDarkMode = activateDarkMode
+      btf.activateLightMode = activateLightMode
+
+      const theme = saveToLocal.get('theme')
+    
+          theme === 'dark' ? activateDarkMode() : theme === 'light' ? activateLightMode() : null
+        
+      
+      const asideStatus = saveToLocal.get('aside-status')
+      if (asideStatus !== undefined) {
+        document.documentElement.classList.toggle('hide-aside', asideStatus === 'hide')
+      }
+    
+      
+    const detectApple = () => {
+      if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent)) {
+        document.documentElement.classList.add('apple')
+      }
+    }
+    detectApple()
+  
+    })()
+  </script><script>const GLOBAL_CONFIG = {
+  root: '/',
+  algolia: undefined,
+  localSearch: undefined,
+  translate: {"defaultEncoding":2,"translateDelay":0,"msgToTraditionalChinese":"繁","msgToSimplifiedChinese":"簡"},
+  highlight: {"plugin":"highlight.js","highlightCopy":true,"highlightLang":true,"highlightHeightLimit":false,"highlightFullpage":false,"highlightMacStyle":false},
+  copy: {
+    success: '复制成功',
+    error: '复制失败',
+    noSupport: '浏览器不支持'
+  },
+  relativeDate: {
+    homepage: false,
+    post: false
+  },
+  runtime: '',
+  dateSuffix: {
+    just: '刚刚',
+    min: '分钟前',
+    hour: '小时前',
+    day: '天前',
+    month: '个月前'
+  },
+  copyright: undefined,
+  lightbox: 'null',
+  Snackbar: undefined,
+  infinitegrid: {
+    js: 'https://cdn.jsdelivr.net/npm/@egjs/infinitegrid@4.13.0/dist/infinitegrid.min.js',
+    buttonText: '加载更多'
+  },
+  isPhotoFigcaption: false,
+  islazyloadPlugin: false,
+  isAnchor: false,
+  percent: {
+    toc: true,
+    rightside: true,
+  },
+  autoDarkmode: false
+}</script><script id="config-diff">var GLOBAL_CONFIG_SITE = {
+  title: '基于 ProtoMotions 的全身控制器训练与部署',
+  isHighlightShrink: false,
+  isToc: true,
+  pageType: 'post'
+}</script><style>.aplayer.aplayer-fixed{opacity:0.08 !important;transition:opacity 0.4s ease !important;} .aplayer.aplayer-fixed:hover{opacity:1 !important;}</style><style>#web_bg::after{content:'';position:fixed;inset:0;background:rgba(8,8,22,0.5);pointer-events:none;z-index:0;} #footer{background-color:#574E91 !important;} #page-header:not(.full_page){background:transparent !important;} .recent-post-item,.card-widget{background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border:1px solid transparent !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;color:#1a1a2e !important;transition:transform 0.3s ease,box-shadow 0.3s ease !important;background-clip:padding-box !important;outline:1.5px solid transparent;position:relative;} .recent-post-item::before,.card-widget::before{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;} .recent-post-item:hover,.card-widget:hover{transform:translateY(-4px) !important;box-shadow:0 12px 36px rgba(80,120,255,0.25) !important;} .recent-post-item a,.card-widget a{color:#3a5a8a !important;} .recent-post-item .article-meta,.card-widget .article-meta{color:#555 !important;}</style><style>.type-tags #page{background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;padding:60px 50px !important;position:relative;overflow:hidden} .type-tags #page::before{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-tags .tag-cloud-list{padding:10px 0;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:12px} .type-tags .tag-cloud-list a{font-size:1.05em !important;padding:10px 24px !important;border-radius:30px !important;margin:0 !important;font-weight:700 !important;letter-spacing:0.06em !important;text-shadow:0 1px 3px rgba(0,0,0,0.18) !important;transition:transform 0.25s,box-shadow 0.25s !important} .type-tags .tag-cloud-list a:hover{transform:translateY(-4px) scale(1.08) !important;box-shadow:0 10px 28px rgba(0,0,0,0.28) !important;filter:brightness(1.1)} .type-tags .tag-cloud-item.tag-color-0{background:linear-gradient(135deg,#4a90d9,#357abd) !important;box-shadow:0 4px 14px rgba(74,144,217,0.45) !important} .type-tags .tag-cloud-item.tag-color-1{background:linear-gradient(135deg,#7c4dbd,#5e35b1) !important;box-shadow:0 4px 14px rgba(124,77,189,0.45) !important} .type-tags .tag-cloud-item.tag-color-2{background:linear-gradient(135deg,#2eb88a,#1a9970) !important;box-shadow:0 4px 14px rgba(46,184,138,0.45) !important} .type-tags .tag-cloud-item.tag-color-3{background:linear-gradient(135deg,#e06c75,#c0392b) !important;box-shadow:0 4px 14px rgba(224,108,117,0.45) !important} .type-tags .tag-cloud-item.tag-color-4{background:linear-gradient(135deg,#d4954a,#b8732a) !important;box-shadow:0 4px 14px rgba(212,149,74,0.45) !important} .type-tags .tag-cloud-item.tag-color-5{background:linear-gradient(135deg,#5b8dee,#3a6fd8) !important;box-shadow:0 4px 14px rgba(91,141,238,0.45) !important} .type-tags .tag-cloud-item.tag-color-6{background:linear-gradient(135deg,#c96db5,#a84d99) !important;box-shadow:0 4px 14px rgba(201,109,181,0.45) !important} .type-tags .tag-cloud-item.tag-color-7{background:linear-gradient(135deg,#3aacb8,#228b96) !important;box-shadow:0 4px 14px rgba(58,172,184,0.45) !important}</style><style>.type-categories #page{background:transparent !important;backdrop-filter:none !important;box-shadow:none !important;border:none !important;padding:0 !important} .type-categories #page::before{display:none} .type-categories .category-lists{padding:0} .type-categories .category-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:20px} .type-categories .category-list>.category-list-item{width:100%;max-width:100%;list-style:none;background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border:1px solid transparent !important;background-clip:padding-box !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;padding:28px 28px 20px !important;position:relative;transition:transform 0.3s ease,box-shadow 0.3s ease !important;color:#1a1a2e !important} .type-categories .category-list>.category-list-item::before{display:none !important} .type-categories .category-list>.category-list-item::after{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-categories .category-list-child .category-list-item::before{display:none !important} .type-categories .category-list>.category-list-item:hover{transform:translateY(-4px) !important;box-shadow:0 12px 36px rgba(80,120,255,0.25) !important} .type-categories .category-list>.category-list-item>.category-list-link{display:block;font-size:1.25em;font-weight:800;color:#1a1a2e !important;letter-spacing:0.04em;margin-bottom:6px} .type-categories .category-list>.category-list-item>.category-list-link:hover{color:#4a90d9 !important} .type-categories .category-list>.category-list-item>.category-list-count{display:block;font-size:0.82em;color:#888 !important;font-weight:400;margin-bottom:16px} .type-categories .category-list>.category-list-item>.category-list-count::before{content:'共 '} .type-categories .category-list>.category-list-item>.category-list-count::after{content:' 篇'} .type-categories .category-list-child{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px} .type-categories .category-list-child .category-list-item{flex:0 0 auto;list-style:none} .type-categories .category-list-child .category-list-link{display:inline-block;padding:8px 20px;border-radius:24px;background:linear-gradient(135deg,rgba(91,141,238,0.15),rgba(124,77,189,0.12));color:#3a5a8a !important;font-size:1.05em;font-weight:700;border:1.5px solid rgba(91,141,238,0.3);transition:all 0.2s} .type-categories .category-list-child .category-list-link:hover{background:linear-gradient(135deg,#5b8dee,#7c4dbd) !important;color:#fff !important;border-color:transparent;transform:translateY(-2px);box-shadow:0 4px 12px rgba(91,141,238,0.35)} .type-categories .category-list-child .category-list-count{display:none}</style><style>.type-about #web_bg{display:none !important;} body.type-about{background:url('/img/dream.JPG') center center / cover no-repeat fixed !important;} .type-about #page{background:rgba(10,10,30,0.65) !important;backdrop-filter:blur(18px) !important;-webkit-backdrop-filter:blur(18px) !important;border-radius:16px !important;box-shadow:0 6px 32px rgba(0,0,0,0.6) !important;padding:60px 50px !important;position:relative;overflow:hidden;color:#e8eaf6 !important} .type-about #page::before{content:'';position:absolute;inset:0;border-radius:16px;padding:2px;background:linear-gradient(135deg,rgba(160,120,255,0.7),rgba(80,160,255,0.5),rgba(140,100,255,0.6));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-about #page h2{color:#c8b4ff !important;font-size:1.6em !important;} .type-about #page p,.type-about #page li{color:#d0d8f0 !important;font-size:1.12em !important;line-height:1.9 !important;} .type-about #page strong{color:#b0c8ff !important;} .type-about #page a{color:#90caf9 !important;}</style><style>.type-link #page{background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;padding:60px 50px !important;position:relative;overflow:hidden} .type-link #page::before{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-link .flink-list-item{position:relative;background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border:1px solid transparent !important;background-clip:padding-box !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;transition:transform 0.3s ease,box-shadow 0.3s ease !important;overflow:visible !important} .type-link .flink-list-item::after{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-link .flink-list-item:hover{transform:translateY(-4px) !important;box-shadow:0 12px 36px rgba(80,120,255,0.25) !important}</style><meta name="generator" content="Hexo 8.1.1"></head><body><div class="bg-animation" id="web_bg" style="background-image: url(/img/background.JPG);"></div><div id="sidebar"><div id="menu-mask"></div><div id="sidebar-menus"><div class="avatar-img text-center"><img src="/img/photo.JPG" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="site-data text-center"><a href="/archives/"><div class="headline">文章</div><div class="length-num">14</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">32</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">14</div></a></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 主页</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 专栏</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 主题</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-user"></i><span> 关于</span></a></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友情链接</span></a></div></div></div></div><div class="post" id="body-wrap"><header class="post-bg" id="page-header"><nav id="nav"><span id="blog-info"><a class="nav-site-title" href="/"><img class="site-icon" src="/img/logo.JPG" alt="Logo"><span class="site-name">Xi Zeng's Blog</span></a><a class="nav-page-title" href="/"><span class="site-name">基于 ProtoMotions 的全身控制器训练与部署</span><span class="site-name"><i class="fa-solid fa-circle-arrow-left"></i><span>  返回首页</span></span></a></span><div id="menus"><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 主页</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 专栏</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 主题</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-user"></i><span> 关于</span></a></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友情链接</span></a></div></div><div id="toggle-menu"><span class="site-page"><i class="fas fa-bars fa-fw"></i></span></div></div></nav><div id="post-info"><h1 class="post-title">基于 ProtoMotions 的全身控制器训练与部署</h1><div id="post-meta"><div class="meta-firstline"><span class="post-meta-date"><i class="far fa-calendar-alt fa-fw post-meta-icon"></i><span class="post-meta-label">发表于</span><time class="post-meta-date-created" datetime="2026-08-13T13:07:26.000Z" title="发表于 2026-08-13 21:07:26">2026-08-13</time><span class="post-meta-separator">|</span><i class="fas fa-history fa-fw post-meta-icon"></i><span class="post-meta-label">更新于</span><time class="post-meta-date-updated" datetime="2026-10-27T16:00:00.000Z" title="更新于 2026-10-28 00:00:00">2026-10-28</time></span><span class="post-meta-categories"><span class="post-meta-separator">|</span><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/%E5%B7%A5%E7%A8%8B%E5%AE%9E%E8%B7%B5/">工程实践</a><i class="fas fa-angle-right post-meta-separator"></i><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/%E5%B7%A5%E7%A8%8B%E5%AE%9E%E8%B7%B5/%E5%85%A8%E8%BA%AB%E6%8E%A7%E5%88%B6/">全身控制</a></span></div><div class="meta-secondline"><span class="post-meta-separator">|</span><span class="post-meta-wordcount"><i class="far fa-file-word fa-fw post-meta-icon"></i><span class="post-meta-label">总字数:</span><span class="word-count">5.8k</span><span class="post-meta-separator">|</span><i class="far fa-clock fa-fw post-meta-icon"></i><span class="post-meta-label">阅读时长:</span><span>19分钟</span></span><span class="post-meta-separator">|</span><span class="post-meta-pv-cv" id="" data-flag-title=""><i class="far fa-eye fa-fw post-meta-icon"></i><span class="post-meta-label">浏览量:</span><span id="busuanzi_value_page_pv"><i class="fa-solid fa-spinner fa-spin"></i></span></span></div></div></div></header><main class="layout" id="content-inner"><div id="post"><article class="container post-content" id="article-container"><p>训练中的动作跟踪表现由整条控制链共同决定：参考在哪个时刻采样、观测如何表示、动作怎样变成关节目标，以及执行器怎样施加力矩。只保存网络权重，会遗漏足以改变机器人行为的控制参数。</p>
+<p>ProtoMotions 是构建和训练物理角色控制器的框架，不能把框架名称当成一个固定策略的名称。本文以一套 31 自由度全身跟踪控制器为例：它使用动作跟踪目标、非对称 actor–critic 和局部一致性正则。其他实验的观测和动作变换可能不同。<a target="_blank" rel="noopener" href="https://github.com/NVlabs/ProtoMotions">ProtoMotions 官方实现</a></p>
+<h2 id="1-从参考采样到执行器：一轮控制怎样完成"><a href="#1-从参考采样到执行器：一轮控制怎样完成" class="headerlink" title="1. 从参考采样到执行器：一轮控制怎样完成"></a>1. 从参考采样到执行器：一轮控制怎样完成</h2><div class="proto-flow" role="group" aria-label="ProtoMotions 训练与部署共享的参考、观测、策略和执行器接口">
+    <div class="proto-flow-heading"><strong>训练与部署共享的执行链</strong><span>逐项核对数值与单位</span></div>
+    <div class="proto-flow-path">
+      <div class="proto-flow-step"><strong>动作采样</strong><span>50 Hz 时间轴<br>未来 1 / 2 / 4 / 8 步</span></div>
+      <div class="proto-flow-step"><strong>观测构造</strong><span>状态、参考与历史<br>上一时刻的关节目标</span></div>
+      <div class="proto-flow-step"><strong>导出策略</strong><span>ONNX forward<br>输出 joint_pos_targets</span></div>
+    </div>
+    <div class="proto-flow-note">本例输出已是关节位置目标，部署端按配套参数执行 PD，不再重复 offset / scale。</div>
+    <div class="proto-flow-heading proto-flow-training"><strong>随模型保存的控制约定</strong><span>部署端读取并验证</span></div>
+    <div class="proto-flow-path proto-contract-fields">
+      <div class="proto-flow-step"><strong>机器人与坐标</strong><span>关节顺序、轴与零位<br>Anchor、四元数约定</span></div>
+      <div class="proto-flow-step"><strong>时间与历史</strong><span>控制周期、参考步长<br>历史排列与动作语义</span></div>
+      <div class="proto-flow-step"><strong>执行器</strong><span>默认姿态、动作映射<br>PD 与力矩限制</span></div>
+    </div>
+    <div class="proto-flow-note">Critic、奖励、随机化与终止规则只参与训练，不是部署 Actor 的额外输入。</div>
+  </div>
+<p><em>图 1：参考、观测和网络输出需在训练与部署中保持相同含义；机器人映射、时间约定和执行器参数与模型一起保存。</em></p>
+<p>可将整个系统写为：</p>
+<script type="math/tex; mode=display">
+m_t=\mathcal M(t),\quad o_t=\mathcal O(s_t,m_t,h_t),\quad
+a_t=\pi_\theta(o_t),\quad q_t^*=\mathcal A(a_t),\quad
+s_{t+1}=\mathcal F(s_t,q_t^*,K_p,K_d).</script><p>其中，<script type="math/tex">\mathcal M</script> 是动作采样器，<script type="math/tex">\mathcal O</script> 是观测构造，<script type="math/tex">h_t</script> 是历史，<script type="math/tex">\mathcal A</script> 是动作变换，<script type="math/tex">\mathcal F</script> 包含执行器与接触动力学。训练 loss 降低，只能说明这五个接口在训练环境下共同产生了某种行为。</p>
+<p>因此迁移要逐项验证：动作是否表达同一个姿态，观测是否使用同一个 frame，网络输出是否经过同一次变换，执行器是否实现同一套位置目标和增益。</p>
+<h2 id="2-动作数据不只是一个关节角数组"><a href="#2-动作数据不只是一个关节角数组" class="headerlink" title="2. 动作数据不只是一个关节角数组"></a>2. 动作数据不只是一个关节角数组</h2><p>一段可用于全身跟踪的动作通常还需要 root 位姿、身体位姿和速度。即使两个文件都是 <code>(T, 31)</code>，关节顺序、轴方向和默认姿态不同，也不能互换。</p>
+<h3 id="重采样首先要保住物理时间"><a href="#重采样首先要保住物理时间" class="headerlink" title="重采样首先要保住物理时间"></a>重采样首先要保住物理时间</h3><p>原动作有 <script type="math/tex">N</script> 帧、频率 <script type="math/tex">f_s</script>，若第一帧时间为零，最后一帧的时间是：</p>
+<script type="math/tex; mode=display">
+T=\frac{N-1}{f_s}.</script><p>以 30 Hz、450 帧转换到 50 Hz 为例，持续时间是 <script type="math/tex">449/30\approx14.9667</script> s，按不超过终点的规则采样得到：</p>
+<script type="math/tex; mode=display">
+N'=\lfloor Tf_t\rfloor+1=749.</script><p>直接把帧数乘 <script type="math/tex">50/30</script> 得到 750，会混淆采样区间和采样点。不同库可能采用保留精确终点的策略；必须把时间戳约定写入转换器，而不是凭帧数猜时长。</p>
+<p>关节角要先处理周期跳变再插值；姿态使用合适的旋转插值；速度应由重采样后的轨迹和实际时间间隔计算。把 50 Hz 的角度差除以 30 Hz 的时间间隔，会将速度缩小为正确值的 0.6 倍，critic、阻尼相关观测和动作相位都会受影响。</p>
+<h3 id="Anchor-是运动学定义，不是随意起的名字"><a href="#Anchor-是运动学定义，不是随意起的名字" class="headerlink" title="Anchor 是运动学定义，不是随意起的名字"></a>Anchor 是运动学定义，不是随意起的名字</h3><p>该控制器选择腰部俯仰关节之后的躯干刚体作为 anchor。腰部关节运动时，它与浮动基座姿态不同。部署中若只有 root IMU，应通过关节状态与运动学关系得到目标 anchor 姿态；直接用 root 四元数填入 anchor 字段会引入与腰部动作相关的系统误差。</p>
+<p>默认姿态也需要和模型一起固定。该配置肘关节默认角是 -0.5 rad；另一套动作跟踪模型使用 +0.4 rad。这个差异要求先检查关节轴与零位定义，不能仅凭正负号认定谁错了，更不能把一个策略的默认角直接塞给另一个模型。</p>
+<h2 id="3-多个时钟如何保持一致"><a href="#3-多个时钟如何保持一致" class="headerlink" title="3. 多个时钟如何保持一致"></a>3. 多个时钟如何保持一致</h2><p>若物理频率为 <script type="math/tex">f_{\mathrm{sim}}</script>、动作保持 <script type="math/tex">d</script> 个物理步，则：</p>
+<script type="math/tex; mode=display">
+f_\pi=\frac{f_{\mathrm{sim}}}{d},\qquad \Delta t_\pi=\frac{d}{f_{\mathrm{sim}}}.</script><p>这套机器人配置的 Isaac Lab 与 Newton 路径均是 200 Hz、decimation 4，得到 50 Hz 策略；Isaac Gym 路径是 100 Hz、decimation 2，并另有物理子步。子步改善积分分辨率，不等于策略进行了更多次观测和决策。</p>
+<p><code>future_steps=[1,2,4,8]</code> 在 50 Hz 下分别指向未来 20、40、80、160 ms。如果只把策略改成 100 Hz 而不改这个列表，前瞻时间就缩短一半，模型条件的含义发生变化。</p>
+<p>部署参数中的 1000 Hz 发布率也不能解释成 1000 Hz 策略。发布线程可以多次发送同一个目标；推理周期应服从模型导出的 <code>control_dt</code>。应分别记录采样、推理完成和命令发送时间戳，统计实际延迟及抖动。</p>
+<p>控制频率也进入学习目标。若只讨论保持相同物理时间尺度的奖励折扣，控制步长改变后应满足：</p>
+<script type="math/tex; mode=display">
+\gamma_{\mathrm{new}}=
+\gamma_{\mathrm{old}}^{\Delta t_{\mathrm{new}}/\Delta t_{\mathrm{old}}}.</script><p>例如从 50 Hz 改成 100 Hz，原 gamma=0.99 对应的新值约为 0.99499；若仍用 0.99，同样一秒后的奖励会受到更强折扣。这只是折扣时间尺度的换算，不代表改一个 gamma 就完成了频率迁移：前瞻参考、动作历史、奖励汇总、GAE 和执行器更新仍需分别对齐。</p>
+<div class="proto-flow" role="group" aria-label="ProtoMotions 执行闭环与训练分支">
+    <div class="proto-flow-heading"><strong>执行闭环</strong><span>训练与部署共用</span></div>
+    <div class="proto-flow-path">
+      <div class="proto-flow-step"><strong>观测与参考</strong><span>带噪状态与前瞻参考<br>未来 1 / 2 / 4 / 8 步<br>上一时刻的关节目标</span></div>
+      <div class="proto-flow-step"><strong>Actor</strong><span>6 层 × 1024 → 均值 μ<br>训练时采样，部署时取均值</span></div>
+      <div class="proto-flow-step"><strong>关节目标与 PD</strong><span>q* = q₀ + S · a<br>S = 力矩上限 / Kp</span></div>
+    </div>
+    <div class="proto-flow-feedback"><span aria-hidden="true">↳</span><span>执行后得到机器人状态，构造下一步观测；训练时同时计算环境回报。</span></div>
+    <div class="proto-flow-heading proto-flow-training"><strong>训练分支</strong><span>不进入部署 Actor 的输入</span></div>
+    <div class="proto-flow-branch">
+      <div><strong>干净配对观测</strong><span>与带噪观测使用同一 Actor<br>比较两次输出的均值</span></div>
+      <span class="proto-flow-arrow" aria-hidden="true">→</span>
+      <div><strong>局部一致性 L2C2</strong><span>均方输出差 /（均方观测差 + ε）<br>λ = 1，加入 Actor 损失</span></div>
+    </div>
+    <div class="proto-flow-branch">
+      <div><strong>特权状态与参考 → Critic</strong><span>干净完整状态<br>4 层 × 1024 → 价值 V</span></div>
+      <span class="proto-flow-arrow" aria-hidden="true">→</span>
+      <div><strong>GAE / PPO</strong><span>环境回报 + V → 优势估计<br>更新 Actor 与 Critic</span></div>
+    </div>
+    <div class="proto-flow-note">环境回报：5 个指数跟踪项 + 2 项代价，汇总时无额外 dt 乘子。</div>
+  </div>
+<p><em>机制图：依据本文的跟踪控制器与局部一致性正则绘制；这是一种具体的训练结构，不代表 ProtoMotions 全部实验的统一结构。</em></p>
+<p>上方是执行闭环。训练分支中，干净观测通过同一个 actor，为 L2C2 提供配对输出；critic 的特权状态参与优势估计，不应在导出时变成 actor 的隐含输入。七项环境回报与 L2C2 分属环境和优化器两层，所以分别检查 <code>combine_rewards</code> 和 actor loss 才能看全目标函数。</p>
+<h2 id="4-Actor-为什么少看一些状态，critic-却多看"><a href="#4-Actor-为什么少看一些状态，critic-却多看" class="headerlink" title="4. Actor 为什么少看一些状态，critic 却多看"></a>4. Actor 为什么少看一些状态，critic 却多看</h2><p>这套 actor 使用带噪声的 reduced coordinates、多个未来参考和上一时刻处理后的动作。配置关闭 root 高度、root 线速度观测和目标 XY 偏移；critic 使用干净的身体坐标与更完整的参考信息。</p>
+<p>这样做的工程目的，是减少部署 actor 对难以稳定获得的世界位置、速度信息的依赖。它不是宣称这些状态没用，而是把“训练时能获得”和“部署时能可靠测到”分开。</p>
+<script type="math/tex; mode=display">
+a_t\sim\pi_\theta(o_t),\qquad V_\phi=V_\phi(s_t,c_t).</script><p>critic 的特权信息帮助估计价值，不应经过观测拼接错误泄露进 actor。导出时应核对 actor 输入键，而不只是检查整个训练模型的输入字典。</p>
+<p>这里还有一个容易忽略的历史量：<code>previous_actions_factory(..., processed=True)</code> 保存的是处理后的关节目标，不是原始高斯动作。部署端应回填相同语义；如果回填了缩放前的 <script type="math/tex">a_{t-1}</script>，网络会看到分布不同的历史。</p>
+<h2 id="5-动作缩放：注释中的-0-25-与实际的-1-0"><a href="#5-动作缩放：注释中的-0-25-与实际的-1-0" class="headerlink" title="5. 动作缩放：注释中的 0.25 与实际的 1.0"></a>5. 动作缩放：注释中的 0.25 与实际的 1.0</h2><p>这套动作函数执行：</p>
+<script type="math/tex; mode=display">
+q^*=q_0+s\odot a.</script><p><code>bm_pd_action</code> 的说明文字提到 <script type="math/tex">0.25\tau_{\max}/K_p</script>，但创建该实验动作配置的 <code>make_bm_pd_action_config</code> 实际计算：</p>
+<script type="math/tex; mode=display">
+s=\frac{\tau_{\max}}{K_p}.</script><p>函数直接使用传入的 scale，没有额外 <code>tanh</code> 或 clamp。下面是该配置工厂得到的值，而不是根据注释推测的值。</p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th><span style="white-space:nowrap">关节组</span></th>
+<th style="text-align:right"><script type="math/tex">K_p</script>（N·m/rad）</th>
+<th style="text-align:right">力矩上限（N·m）</th>
+<th style="text-align:right">实际 <script type="math/tex">s</script>（rad/action）</th>
+<th style="text-align:right">若采用 0.25 系数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span style="white-space:nowrap">髋、膝</span></td>
+<td style="text-align:right">250</td>
+<td style="text-align:right">140</td>
+<td style="text-align:right">0.560</td>
+<td style="text-align:right">0.140</td>
+</tr>
+<tr>
+<td><span style="white-space:nowrap">踝</span></td>
+<td style="text-align:right">80</td>
+<td style="text-align:right">42</td>
+<td style="text-align:right">0.525</td>
+<td style="text-align:right">0.13125</td>
+</tr>
+<tr>
+<td><span style="white-space:nowrap">腰</span></td>
+<td style="text-align:right">150</td>
+<td style="text-align:right">42</td>
+<td style="text-align:right">0.280</td>
+<td style="text-align:right">0.070</td>
+</tr>
+<tr>
+<td><span style="white-space:nowrap">肩、肘</span></td>
+<td style="text-align:right">60</td>
+<td style="text-align:right">42</td>
+<td style="text-align:right">0.700</td>
+<td style="text-align:right">0.175</td>
+</tr>
+<tr>
+<td><span style="white-space:nowrap">腕、头</span></td>
+<td style="text-align:right">25</td>
+<td style="text-align:right">19</td>
+<td style="text-align:right">0.760</td>
+<td style="text-align:right">0.190</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>这不意味着 <script type="math/tex">a=1</script> 时实际电机总会达到最大力矩。在 <script type="math/tex">q=q_0</script>、速度为零、显式比例控制且没有其他项的简化条件下，<script type="math/tex">K_p s=\tau_{\max}</script>；实际力矩还取决于当前位置、阻尼、求解器及饱和。</p>
+<p>如果只在部署时“修正”为注释中的 0.25，目标偏移将缩小四倍，等于换了动作接口。这种改动应作为重新训练或重新评估的控制配置，不能作为不影响行为的文字修正。</p>
+<p>也不能因为原始动作无界，就认为关节目标一定合法。需要记录动作分位数、目标超限比例和实际力矩饱和比例，确认训练中的限制机制与部署保护一致。</p>
+<h2 id="6-L2C2-实现究竟惩罚什么"><a href="#6-L2C2-实现究竟惩罚什么" class="headerlink" title="6. L2C2 实现究竟惩罚什么"></a>6. L2C2 实现究竟惩罚什么</h2><p>这个实验构造 clean/noisy 成对观测。令批大小为 B、动作维度为 n，配对观测中共有 N 个标量元素。代码先分别计算整批元素的均方差：</p>
+<script type="math/tex; mode=display">
+D_{\mathrm{out}}=\frac{1}{Bn}\sum_{b,j}
+(\mu_{b,j}^{\mathrm{noisy}}-\mu_{b,j}^{\mathrm{clean}})^2,\qquad
+D_{\mathrm{in}}=\operatorname{stopgrad}\left(
+\frac{1}{N}\sum_{k\in\mathcal P}\sum_{b,j}
+(o_{k,b,j}^{\mathrm{noisy}}-o_{k,b,j}^{\mathrm{clean}})^2\right),</script><script type="math/tex; mode=display">
+L_{\mathrm{local}}=\frac{D_{\mathrm{out}}}{D_{\mathrm{in}}+10^{-8}}.</script><p>集合 P 只包含指定的 clean/noisy 观测对；共享历史动作没有对应扰动，不计入分母。分母在梯度图中被 detach，配置权重为 1。整批的比值也不等于逐样本比值的平均：后者会让扰动极小的个别样本获得很大权重。它是采样扰动上的局部敏感度约束，不能解释为对所有状态成立的全局 Lipschitz 证明。</p>
+<p>分母包含位置、角度、速度等不同单位的观测差时，数值会受到特征尺度影响。因此观测归一化、噪声幅度和正则权重必须一起解释。该实现用输入张量差构造分母，不能未经检查便称作“归一化空间中的距离”。</p>
+<p>更进一步，网络动作平滑不等于力矩平滑。在固定状态的局部近似下：</p>
+<script type="math/tex; mode=display">
+\Delta\tau\approx K_p\operatorname{diag}(s)\Delta\mu.</script><p>同样的 <script type="math/tex">\Delta\mu</script>，在不同动作缩放下会产生不同的力矩变化。若目标是抑制真实机械抖动，评估还应包含处理后的目标速度和实际力矩变化，而不只是 <code>l2c2_loss</code>。</p>
+<h2 id="7-奖励、初始化和扰动组成同一个训练任务"><a href="#7-奖励、初始化和扰动组成同一个训练任务" class="headerlink" title="7. 奖励、初始化和扰动组成同一个训练任务"></a>7. 奖励、初始化和扰动组成同一个训练任务</h2><p>该实验使用全局 anchor 方向、相对身体位置和方向、身体线速度与角速度等跟踪项，另有动作变化和关节限位惩罚。相对身体位置项权重 1、sigma 0.3，方向项权重 1、sigma 0.4，anchor 方向权重 0.5。anchor 高度相对参考误差阈值为 0.25 m，不能误读为绝对离地高度只有 0.25 m 才终止。</p>
+<p>配置不在每步把参考重新对齐机器人位置。这一点影响策略如何处理累计漂移：若评估时偷偷每帧对齐，得到的跟踪误差会掩盖世界系偏移。</p>
+<p>位置、角速度、关节观测噪声与 reset 噪声也不是同一件事。前者训练对测量不确定性的适应，后者扩大初始状态分布；随机外力训练恢复行为。三种机制可以互补，不能用“已经加了 domain randomization”省略具体幅度、频率和分布。</p>
+<p>这套配置是 6 层、每层 1024 单元的 actor MLP，critic 为 4 层 1024。模型足够大并不能自动解释泛化。应固定架构比较动作覆盖，再固定数据比较架构，否则数据与容量效应无法区分。</p>
+<h3 id="当前实验启用的项，而不是框架能力清单"><a href="#当前实验启用的项，而不是框架能力清单" class="headerlink" title="当前实验启用的项，而不是框架能力清单"></a>当前实验启用的项，而不是框架能力清单</h3><p>下表对应本文采用的动作跟踪＋局部一致性正则方案。<code>combine_rewards</code> 对七个环境项直接按权重相加，这条汇总路径没有额外乘 <code>dt</code>；因此相同的 1.0 与 Isaac Lab／Holosoma 的 1.0 不具有相同单步尺度。五个指数项全为 1、两项代价为 0 时，原始环境奖励为 4.5。该实验还设置 <code>normalize_rewards=False</code>。</p>
+<p>把五个跟踪核分别记为 anchor 方向、身体位置、身体方向、线速度和角速度奖励，单步回报为：</p>
+<script type="math/tex; mode=display">
+R_t=0.5r_{\mathrm{anchor\,ori}}+r_{\mathrm{body\,pos}}
++r_{\mathrm{body\,ori}}+r_{\mathrm{lin\,vel}}+r_{\mathrm{ang\,vel}}
+-0.1\|a_t^{\mathrm{processed}}-a_{t-1}^{\mathrm{processed}}\|_2
+-10c_{\mathrm{limit}}.</script><p>PPO 使用这个 R 计算 GAE 和 return，actor 损失再单独加入一致性项：</p>
+<script type="math/tex; mode=display">
+L_{\mathrm{actor}}=-L_{\mathrm{clip}}+1.0L_{\mathrm{local}}
+-c_H\mathcal H(\pi)+L_{\mathrm{bounds}}+L_{\mathrm{model}}.</script><p>当前 MLP 实验启用可学习标准差，默认熵系数为 0.005，PPO 裁剪范围为 0.2；bounds 项按配置开关加入，model 项取决于网络是否提供附加损失。它们都不进入环境奖励。critic 另有自己的回归更新，当前启用价值裁剪：</p>
+<script type="math/tex; mode=display">
+V_{\mathrm{clip}}=V_{\mathrm{old}}+
+\operatorname{clip}(V_\phi-V_{\mathrm{old}},-\epsilon,\epsilon),\qquad
+L_V=\mathbb E\max\left[(V_\phi-\hat R)^2,
+(V_{\mathrm{clip}}-\hat R)^2\right].</script><p>这里的 return 是归一化优势之前得到的训练目标。环境中的动作变化代价约束相邻时刻的关节目标，L2C2 约束同一状态附近的输入扰动响应，价值损失约束 critic；三者的自变量、单位和梯度路径都不同。</p>
+<p>点击名称可跳到对应的公式与实现说明，并自动展开。</p>
+<div class="table-container">
+<div class="reward-table-wrap" tabindex="0" role="region" aria-label="奖励与代价参数表，可横向滚动"><table class="reward-table">
+<thead>
+<tr>
+<th>名称</th>
+<th>系数</th>
+<th>尺度／定义</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#reward-proto-0"><code>global_anchor_ori</code></a></td>
+<td>0.5</td>
+<td>σ = 0.4 rad</td>
+<td>跟住 anchor 朝向</td>
+</tr>
+<tr>
+<td><a href="#reward-proto-1"><code>relative_body_pos</code></a></td>
+<td>1</td>
+<td>std = 0.3 m</td>
+<td>保留身体相对几何</td>
+</tr>
+<tr>
+<td><a href="#reward-proto-2"><code>relative_body_ori</code></a></td>
+<td>1</td>
+<td>std = 0.4 rad</td>
+<td>保留各身体姿态</td>
+</tr>
+<tr>
+<td><a href="#reward-proto-3"><code>body_lin_vel</code></a></td>
+<td>1</td>
+<td>std = 1 m/s</td>
+<td>匹配平移速度</td>
+</tr>
+<tr>
+<td><a href="#reward-proto-4"><code>body_ang_vel</code></a></td>
+<td>1</td>
+<td>std = 3.14 rad/s</td>
+<td>匹配转动速度</td>
+</tr>
+<tr>
+<td><a href="#reward-proto-5"><code>action_rate</code></a></td>
+<td>−0.1</td>
+<td>processed action 的 L2 范数</td>
+<td>限制相邻关节目标变化</td>
+</tr>
+<tr>
+<td><a href="#reward-proto-6"><code>limits_dof_pos</code></a></td>
+<td>−10</td>
+<td>机器人配置的上下界</td>
+<td>限制越界</td>
+</tr>
+<tr>
+<td><a href="#reward-proto-7"><code>L2C2</code></a></td>
+<td>λ = 1</td>
+<td>优化器正则；非环境奖励</td>
+<td>限制噪声附近输出变化</td>
+</tr>
+</tbody>
+</table></div>
+</div>
+<h3 id="逐项实现"><a href="#逐项实现" class="headerlink" title="逐项实现"></a>逐项实现</h3><details class="reward-detail" id="reward-proto-0"><summary>global_anchor_ori</summary><div class="reward-detail-body"><p>由 <code>global_anchor_ori_rew_factory</code> 绑定 <code>compute_global_anchor_ori_rew</code>，使用最短四元数旋转误差；anchor 从机器人配置解析。当前实验没有同时启用 anchor 位置奖励，因此不能把 BeyondMimic 的 0.5 位置项补进来。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">angle = quat_error_magnitude(q_ref, q_actual)</span><br><span class="line">r = torch.exp(-angle.square() / <span class="number">0.4</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-proto-1"><summary>relative_body_pos</summary><div class="reward-detail-body"><p><code>compute_relative_body_pos_rew</code> 比较经过 anchor/yaw 对齐的参考身体位置与实际位置：先对 xyz 求平方和，再对身体取均值，最后求一次 exp。它不是逐身体 exp 后求平均。与 BeyondMimic 对齐时保留参考 anchor 高度不同，这个核对实际／参考各自减去完整 xyz anchor 位置，再各自去 yaw，因此整体高度偏差也被相对化；当前配置靠 anchor 高度终止等机制补充约束。身体列表改变后，每个部位在均值中的占比也会改变。 工厂把当前状态、参考状态和身体索引绑定到纯 tensor kernel；该实验未额外传入区域权重，不能把其他实验的手脚加权自动套用。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">err2 = (p_body_aligned - p_body).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">r = torch.exp(-err2.mean(-<span class="number">1</span>) / <span class="number">0.3</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-proto-2"><summary>relative_body_ori</summary><div class="reward-detail-body"><p><code>compute_relative_body_ori_rew</code> 对每个身体计算最短旋转角，平方后在身体维度平均，再用 0.4 rad 核。相对目标的构造与位置项共享参考约定，不能把局部和世界四元数混用。 工厂把当前状态、参考状态和身体索引绑定到纯 tensor kernel；该实验未额外传入区域权重，不能把其他实验的手脚加权自动套用。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">angle = quat_error_magnitude(q_body_aligned, q_body)</span><br><span class="line">r = torch.exp(-angle.square().mean(-<span class="number">1</span>) / <span class="number">0.4</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-proto-3"><summary>body_lin_vel</summary><div class="reward-detail-body"><p><code>compute_global_body_lin_vel_rew</code> 比较世界系身体线速度，三轴平方和后对身体平均；1 m/s 是误差尺度。位置很接近但身体仍在快速冲过目标时，这项会降低奖励。 工厂把当前状态、参考状态和身体索引绑定到纯 tensor kernel；该实验未额外传入区域权重，不能把其他实验的手脚加权自动套用。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">err2 = (v_ref_w - v_w).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">r = torch.exp(-err2.mean(-<span class="number">1</span>) / <span class="number">1.0</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-proto-4"><summary>body_ang_vel</summary><div class="reward-detail-body"><p><code>compute_global_body_ang_vel_rew</code> 比较世界系身体角速度。3.14 rad/s 是指数核尺度，不是机器人最大允许角速度。它补充姿态项，但不能替代力矩限制。 工厂把当前状态、参考状态和身体索引绑定到纯 tensor kernel；该实验未额外传入区域权重，不能把其他实验的手脚加权自动套用。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">err2 = (omega_ref_w - omega_w).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">r = torch.exp(-err2.mean(-<span class="number">1</span>) / <span class="number">3.14</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-proto-5"><summary>action_rate</summary><div class="reward-detail-body"><p><code>action_smoothness_factory</code> 调用 <code>compute_action_smoothness → delta_norm</code>。源码执行 <code>torch.norm(diff, dim=-1)</code>，不是平方和！本实验 processed action 是完成动作映射后的关节目标，因此作用尺度还受每个关节 action scale 影响。把它与 BeyondMimic 的原始动作平方和共用 −0.1，不代表两者正则强度相同。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">cost = torch.linalg.vector_norm(q_target - q_target_prev, dim=-<span class="number">1</span>)</span><br><span class="line">weighted = -<span class="number">0.1</span> * cost</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-proto-6"><summary>limits_dof_pos</summary><div class="reward-detail-body"><p><code>compute_soft_pos_limit_rew</code> 名字虽然带 soft，实际边界由 <code>kinematic_info.dof_limits_lower/upper</code> 传入。核函数将线性越界距离求和；当前实验没有传入可选的 <code>max_violation</code>，所以不能宣称惩罚已经封顶。不要把 Holosoma 的 0.98 范围收缩参数套到这里。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">cost = ((lower_soft - q).clamp_min(<span class="number">0</span>)</span><br><span class="line">        + (q - upper_soft).clamp_min(<span class="number">0</span>)).<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-proto-7"><summary>L2C2</summary><div class="reward-detail-body"><p>这里列出是为了交代总优化目标，不能与上面七项加成单步奖励。当前实现使用干净／带噪观测的 actor 均值差，除以输入差的平方均值及稳定项；分子和分母各自在整批元素上求均值后取比值，不能改成逐样本比值再平均；分母 detach，未配对的历史动作不计入分母。输入使用哪一级归一化张量会改变这一比值，详见第 6 节。它不是动作率惩罚，也不直接证明整个闭环满足 Lipschitz 上界。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># paired_diffs 只含配置指定的 clean/noisy 观测对</span></span><br><span class="line">input_ss = <span class="built_in">sum</span>(diff.square().<span class="built_in">sum</span>() <span class="keyword">for</span> diff <span class="keyword">in</span> paired_diffs)</span><br><span class="line">input_n = <span class="built_in">sum</span>(diff.numel() <span class="keyword">for</span> diff <span class="keyword">in</span> paired_diffs)</span><br><span class="line">denominator = (input_ss / input_n).detach()</span><br><span class="line">numerator = (mu_noisy - mu_clean).square().mean()</span><br><span class="line">loss_l2c2 = numerator / (denominator + <span class="number">1e-8</span>)</span><br><span class="line">loss_actor = loss_ppo + <span class="number">1.0</span> * loss_l2c2</span><br></pre></td></tr></table></figure>
+</div></details>
+<p><img src="/img/control-series/reward-kernels.svg" alt="指数核与动作平滑代价的数学对照"></p>
+<p><em>解析图：按公式计算，无训练或实机测量。左图比较归一化误差下的两类指数核，右图用单维变化展示范数与平方代价的差异；多关节时还需考虑聚合方式和动作单位。</em></p>
+<p>例如同一单位下单维动作变化 0.1，L2 范数为 0.1、平方和为 0.01，相差十倍；变化达到 1 时才相同。正则项名称、系数相同，而原始量不同，训练效果当然不能直接等价。</p>
+<h3 id="相对原生方案，改动发生在何处"><a href="#相对原生方案，改动发生在何处" class="headerlink" title="相对原生方案，改动发生在何处"></a>相对原生方案，改动发生在何处</h3><p>这套跟踪方案复用了 ProtoMotions 的组件机制，并选择 BeyondMimic 风格的参考对齐与跟踪项；它不是 ProtoMotions 所有 mimic 实验的统一默认值。与本文 BeyondMimic 基线相比，当前配置未启用 anchor 位置和非期望接触两项，动作平滑从原始动作平方和换成 processed action 的范数，并加入 L2C2。接触惩罚函数存在于框架中，不代表这份实验调用了它。</p>
+<p>机器人适配进一步修改 31 自由度的关节映射、默认姿态、PD 与动作尺度。运行代码采用 <code>effort / stiffness</code>，而部分说明仍写 <code>0.25 * effort / stiffness</code>；以上一节算出的肩部 0.7 rad/action 为例，这个差异会把未饱和的动作到力矩增益放大四倍。导出协议必须记录运行值。</p>
+<h2 id="8-策略导出与部署接口的一致性"><a href="#8-策略导出与部署接口的一致性" class="headerlink" title="8. 策略导出与部署接口的一致性"></a>8. 策略导出与部署接口的一致性</h2><p>部署端读取与 ONNX 配套的控制参数，验证自由度数、anchor、关节顺序、控制周期与参考步长，并检查输入输出形状及有限值。它拒绝需要当前世界位置等部署端无法满足的输入契约。</p>
+<p>尤其要确认 ONNX 输出名 <code>joint_pos_targets</code>：它已经表示最终关节位置目标。不能再执行一次 <script type="math/tex">q_0+s a</script>。若输出是原始动作，则必须执行一次；这两种模型必须用显式元数据区分。</p>
+<p>用一条固定测试向量检查接口，比只检查张量维度更有价值：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 教学示意：训练端和部署端使用同一个冻结状态与参考</span></span><br><span class="line">obs_train = build_training_observation(state, reference, previous_target)</span><br><span class="line">obs_deploy = build_deployment_observation(state, reference, previous_target)</span><br><span class="line">assert_close(obs_train, obs_deploy, atol=<span class="number">1e-5</span>)</span><br><span class="line">target_train = exported_training_forward(obs_train)</span><br><span class="line">target_deploy = onnx_forward(obs_deploy)[<span class="string">&quot;joint_pos_targets&quot;</span>]</span><br><span class="line">assert_close(target_train, target_deploy, atol=<span class="number">1e-4</span>)</span><br></pre></td></tr></table></figure>
+<p>测试向量至少包括站姿、腰部旋转、非零关节速度和一组非平凡四元数。全零输入可能无法暴露轴顺序和符号错误。</p>
+<p>动作滤波同样属于契约。该 tracker 默认不启用额外动作滤波，EMA 系数为 1、加速度上限为空。临时加很强的低通虽然可能让曲线好看，也会增加相位延迟，应重新评估跟踪和失稳边界。</p>
+<h2 id="9-跟踪评估与关键消融"><a href="#9-跟踪评估与关键消融" class="headerlink" title="9. 跟踪评估与关键消融"></a>9. 跟踪评估与关键消融</h2><p>先报告固定动作集合上的连续跟踪成功率、局部/全局身体位置误差、滑脚速度、力矩饱和比例和推理延迟。再将动作按接触切换、腰部大旋转、快速摆臂、单脚支撑分层，检查最差类别，而不是只展示平均值。</p>
+<p>建议的最小消融是：动作尺度系数 0.25 与 1、L2C2 开关、不同参考前瞻长度。每组均从相同协议训练与评估，不能把一个现成 checkpoint 的 scale 临时改掉来代替公平对比。</p>
+<p>本文报告控制器结构与配置计算，尚未提供上述消融的训练结果或实测延迟曲线。</p>
+<p>在这个基础上，再引入更多动作、masked conditioning 或更复杂策略结构，才能辨认性能收益来自哪里。ProtoMotions 的价值是让这些组件可以在明确接口上迭代；一套没有经过接口验证的大模型，仍可能只是更昂贵的错误控制器。</p>
+<link rel="stylesheet" href="/css/control-series.css"><script src="/js/control-series.js" defer></script></article><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta"><i class="fas fa-circle-user fa-fw"></i>文章作者: </span><span class="post-copyright-info"><a href="https://cherishxi.xyz">Xi Zeng</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta"><i class="fas fa-square-arrow-up-right fa-fw"></i>文章链接: </span><span class="post-copyright-info"><a href="https://cherishxi.xyz/2026/08/13/protomotions-oli-controller/">https://cherishxi.xyz/2026/08/13/protomotions-oli-controller/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta"><i class="fas fa-circle-exclamation fa-fw"></i>版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来源 <a href="https://cherishxi.xyz" target="_blank">Xi Zeng's Blog</a>！</span></div></div><div class="tag_share"><div class="post-meta__tag-list"><a class="post-meta__tags" href="/tags/%E5%85%A8%E8%BA%AB%E6%8E%A7%E5%88%B6/">全身控制</a><a class="post-meta__tags" href="/tags/ProtoMotions/">ProtoMotions</a><a class="post-meta__tags" href="/tags/Sim2Real/">Sim2Real</a></div><div class="post-share"><div class="social-share" data-image="/img/photo.JPG" data-sites="facebook,x,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/css/share.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/js/social-share.min.js" defer></script></div></div><nav class="pagination-post" id="pagination"><a class="pagination-related" href="/2026/09/06/compliance-gentle-omni-falcon/" title="从动作跟踪到柔顺交互：参考动力学与接触控制"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info"><div class="info-1"><div class="info-item-1">上一篇</div><div class="info-item-2">从动作跟踪到柔顺交互：参考动力学与接触控制</div></div><div class="info-2"><div class="info-item-1">从虚拟质量、驱动力与交互弹簧推导柔顺参考，结合 GentleHumanoid、基于 Omni 的物体交互及 FALCON 扩展，分析力限幅、积分边界、预紧与接触丢失，以及奖励怎样约束退让和平衡。</div></div></div></a><a class="pagination-related" href="/2026/07/24/retargeting-gmr-pyroki-omni/" title="人体动作重定向原理与实现：GMR、PyRoKi 与 OmniRetarget"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-right"><div class="info-1"><div class="info-item-1">下一篇</div><div class="info-item-2">人体动作重定向原理与实现：GMR、PyRoKi 与 OmniRetarget</div></div><div class="info-2"><div class="info-item-1">从 FK、Jacobian 和残差线性化出发，推导速度级 IK、Gauss–Newton、LM 与约束优化，对照 GMR、PyRoKi 轨迹建模和 OmniRetarget 的交互保持机制，解释代价权重、时间尺度与几何可行性的边界。</div></div></div></a></nav><div class="relatedPosts"><div class="headline"><i class="fas fa-thumbs-up fa-fw"></i><span>相关推荐</span></div><div class="relatedPosts-list"><a class="pagination-related" href="/2026/10/08/whole-body-controllers-why-protomotions/" title="人形机器人全身控制器对比：为什么选择 ProtoMotions"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-08</div><div class="info-item-2">人形机器人全身控制器对比：为什么选择 ProtoMotions</div></div><div class="info-2"><div class="info-item-1">沿动作参考、统一运动表示和任务提示三条路线，拆解 BeyondMimic、ProtoMotions、TWIST2、SONIC 与 BFM-Zero 的条件接口、优化目标和迁移成本，说明选择 ProtoMotions 继续研究全身控制与柔顺交互的技术依据。</div></div></div></a><a class="pagination-related" href="/2026/06/17/beyondmimic-control-foundations/" title="BeyondMimic 全身动作跟踪原理与机器人适配"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-06-17</div><div class="info-item-2">BeyondMimic 全身动作跟踪原理与机器人适配</div></div><div class="info-2"><div class="info-item-1">拆解 BeyondMimic 的参考、观测、跟踪奖励与采样机制，以逐际动力平台为例计算 armature、PD 增益和动作尺度，并对照不同执行器接口、碰撞几何与接触惩罚的实际差异。</div></div></div></a></div></div></div><div class="aside-content" id="aside-content"><div class="card-widget card-info text-center"><div class="avatar-img"><img src="/img/photo.JPG" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="author-info-name">Xi Zeng</div><div class="author-info-description"></div><div class="site-data"><a href="/archives/"><div class="headline">文章</div><div class="length-num">14</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">32</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">14</div></a></div><a id="card-info-btn" target="_blank" rel="noopener" href="https://github.com/Cherishings"><i class="fab fa-github"></i><span>Follow Me</span></a><div class="card-info-social-icons"><a class="social-icon" href="https://github.com/Cherishings" target="_blank" title="Github"><i class="fab fa-github" style="color: #24292e;"></i></a><a class="social-icon" href="mailto:504132714@qq.com" target="_blank" title="Email"><i class="fas fa-envelope" style="color: #4a7dbe;"></i></a></div></div><div class="card-widget card-announcement"><div class="item-headline"><i class="fas fa-bullhorn fa-shake"></i><span>公告</span></div><div class="announcement_content">纸质与电子档笔记持续整理中，更多分享即将出炉</div></div><div class="sticky_layout"><div class="card-widget" id="card-toc"><div class="item-headline"><i class="fas fa-stream"></i><span>目录</span><span class="toc-percentage"></span></div><div class="toc-content"><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#1-%E4%BB%8E%E5%8F%82%E8%80%83%E9%87%87%E6%A0%B7%E5%88%B0%E6%89%A7%E8%A1%8C%E5%99%A8%EF%BC%9A%E4%B8%80%E8%BD%AE%E6%8E%A7%E5%88%B6%E6%80%8E%E6%A0%B7%E5%AE%8C%E6%88%90"><span class="toc-text">1. 从参考采样到执行器：一轮控制怎样完成</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#2-%E5%8A%A8%E4%BD%9C%E6%95%B0%E6%8D%AE%E4%B8%8D%E5%8F%AA%E6%98%AF%E4%B8%80%E4%B8%AA%E5%85%B3%E8%8A%82%E8%A7%92%E6%95%B0%E7%BB%84"><span class="toc-text">2. 动作数据不只是一个关节角数组</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%87%8D%E9%87%87%E6%A0%B7%E9%A6%96%E5%85%88%E8%A6%81%E4%BF%9D%E4%BD%8F%E7%89%A9%E7%90%86%E6%97%B6%E9%97%B4"><span class="toc-text">重采样首先要保住物理时间</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Anchor-%E6%98%AF%E8%BF%90%E5%8A%A8%E5%AD%A6%E5%AE%9A%E4%B9%89%EF%BC%8C%E4%B8%8D%E6%98%AF%E9%9A%8F%E6%84%8F%E8%B5%B7%E7%9A%84%E5%90%8D%E5%AD%97"><span class="toc-text">Anchor 是运动学定义，不是随意起的名字</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#3-%E5%A4%9A%E4%B8%AA%E6%97%B6%E9%92%9F%E5%A6%82%E4%BD%95%E4%BF%9D%E6%8C%81%E4%B8%80%E8%87%B4"><span class="toc-text">3. 多个时钟如何保持一致</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#4-Actor-%E4%B8%BA%E4%BB%80%E4%B9%88%E5%B0%91%E7%9C%8B%E4%B8%80%E4%BA%9B%E7%8A%B6%E6%80%81%EF%BC%8Ccritic-%E5%8D%B4%E5%A4%9A%E7%9C%8B"><span class="toc-text">4. Actor 为什么少看一些状态，critic 却多看</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#5-%E5%8A%A8%E4%BD%9C%E7%BC%A9%E6%94%BE%EF%BC%9A%E6%B3%A8%E9%87%8A%E4%B8%AD%E7%9A%84-0-25-%E4%B8%8E%E5%AE%9E%E9%99%85%E7%9A%84-1-0"><span class="toc-text">5. 动作缩放：注释中的 0.25 与实际的 1.0</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#6-L2C2-%E5%AE%9E%E7%8E%B0%E7%A9%B6%E7%AB%9F%E6%83%A9%E7%BD%9A%E4%BB%80%E4%B9%88"><span class="toc-text">6. L2C2 实现究竟惩罚什么</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#7-%E5%A5%96%E5%8A%B1%E3%80%81%E5%88%9D%E5%A7%8B%E5%8C%96%E5%92%8C%E6%89%B0%E5%8A%A8%E7%BB%84%E6%88%90%E5%90%8C%E4%B8%80%E4%B8%AA%E8%AE%AD%E7%BB%83%E4%BB%BB%E5%8A%A1"><span class="toc-text">7. 奖励、初始化和扰动组成同一个训练任务</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%BD%93%E5%89%8D%E5%AE%9E%E9%AA%8C%E5%90%AF%E7%94%A8%E7%9A%84%E9%A1%B9%EF%BC%8C%E8%80%8C%E4%B8%8D%E6%98%AF%E6%A1%86%E6%9E%B6%E8%83%BD%E5%8A%9B%E6%B8%85%E5%8D%95"><span class="toc-text">当前实验启用的项，而不是框架能力清单</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%80%90%E9%A1%B9%E5%AE%9E%E7%8E%B0"><span class="toc-text">逐项实现</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%9B%B8%E5%AF%B9%E5%8E%9F%E7%94%9F%E6%96%B9%E6%A1%88%EF%BC%8C%E6%94%B9%E5%8A%A8%E5%8F%91%E7%94%9F%E5%9C%A8%E4%BD%95%E5%A4%84"><span class="toc-text">相对原生方案，改动发生在何处</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#8-%E7%AD%96%E7%95%A5%E5%AF%BC%E5%87%BA%E4%B8%8E%E9%83%A8%E7%BD%B2%E6%8E%A5%E5%8F%A3%E7%9A%84%E4%B8%80%E8%87%B4%E6%80%A7"><span class="toc-text">8. 策略导出与部署接口的一致性</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#9-%E8%B7%9F%E8%B8%AA%E8%AF%84%E4%BC%B0%E4%B8%8E%E5%85%B3%E9%94%AE%E6%B6%88%E8%9E%8D"><span class="toc-text">9. 跟踪评估与关键消融</span></a></li></ol></div></div><div class="card-widget card-recent-post"><div class="item-headline"><i class="fas fa-history"></i><span>最新文章</span></div><div class="aside-list"><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/10/08/whole-body-controllers-why-protomotions/" title="人形机器人全身控制器对比：为什么选择 ProtoMotions">人形机器人全身控制器对比：为什么选择 ProtoMotions</a><time datetime="2026-10-08T15:14:09.000Z" title="发表于 2026-10-08 23:14:09">2026-10-08</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/09/06/compliance-gentle-omni-falcon/" title="从动作跟踪到柔顺交互：参考动力学与接触控制">从动作跟踪到柔顺交互：参考动力学与接触控制</a><time datetime="2026-09-06T08:53:41.000Z" title="发表于 2026-09-06 16:53:41">2026-09-06</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/08/13/protomotions-oli-controller/" title="基于 ProtoMotions 的全身控制器训练与部署">基于 ProtoMotions 的全身控制器训练与部署</a><time datetime="2026-08-13T13:07:26.000Z" title="发表于 2026-08-13 21:07:26">2026-08-13</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/07/24/retargeting-gmr-pyroki-omni/" title="人体动作重定向原理与实现：GMR、PyRoKi 与 OmniRetarget">人体动作重定向原理与实现：GMR、PyRoKi 与 OmniRetarget</a><time datetime="2026-07-23T16:32:57.000Z" title="发表于 2026-07-24 00:32:57">2026-07-24</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/06/17/beyondmimic-control-foundations/" title="BeyondMimic 全身动作跟踪原理与机器人适配">BeyondMimic 全身动作跟踪原理与机器人适配</a><time datetime="2026-06-17T11:46:12.000Z" title="发表于 2026-06-17 19:46:12">2026-06-17</time></div></div></div></div></div></div></main><footer id="footer"><div class="footer-other"><div class="footer-copyright"><span class="copyright">&copy;&nbsp;2026 By Xi Zeng</span></div><div class="footer_custom_text">在这一隅角落，获得知识与灵魂的心安之所<br>Find in this little corner a place of peace for knowledge and the soul.</div></div></footer></div><div id="rightside"><div id="rightside-config-hide"><button id="readmode" type="button" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="translateLink" type="button" title="简繁转换">繁</button><button id="darkmode" type="button" title="日间和夜间模式切换"><i class="fas fa-adjust"></i></button><button id="hide-aside-btn" type="button" title="单栏和双栏切换"><i class="fas fa-arrows-alt-h"></i></button></div><div id="rightside-config-show"><button id="rightside-config" type="button" title="设置"><i class="fas fa-cog fa-spin"></i></button><button class="close" id="mobile-toc-button" type="button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" type="button" title="回到顶部"><span class="scroll-percent"></span><i class="fas fa-arrow-up"></i></button></div></div><div><script src="/js/utils.js?v=5.5.4"></script><script src="/js/main.js?v=5.5.4"></script><script src="/js/tw_cn.js?v=5.5.4"></script><div class="js-pjax"><script>(() => {
+  const loadMathjax = () => {
+    if (!window.MathJax) {
+      window.MathJax = {
+        loader: {
+          load: [
+            // Four font extension packages (optional)
+            //- '[tex]/bbm',
+            //- '[tex]/bboldx',
+            //- '[tex]/dsfont',
+            '[tex]/mhchem'
+          ],
+          paths: {
+            'mathjax-newcm': '[mathjax]/../@mathjax/mathjax-newcm-font',
+
+            //- // Four font extension packages (optional)
+            //- 'mathjax-bbm-extension': '[mathjax]/../@mathjax/mathjax-bbm-font-extension',
+            //- 'mathjax-bboldx-extension': '[mathjax]/../@mathjax/mathjax-bboldx-font-extension',
+            //- 'mathjax-dsfont-extension': '[mathjax]/../@mathjax/mathjax-dsfont-font-extension',
+            'mathjax-mhchem-extension': '[mathjax]/../@mathjax/mathjax-mhchem-font-extension'
+          }
+        },
+        output: {
+          font: 'mathjax-newcm',
+        },
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          tags: 'none',
+          packages: {
+            '[+]': [
+              'mhchem'
+            ]
+          }
+        },
+        chtml: {
+          scale: 1.1
+        },
+        options: {
+          enableMenu: true,
+          menuOptions: {
+            settings: {
+              enrich: false  // Turn off Braille and voice narration text automatic generation
+            }
+          },
+          renderActions: {
+            findScript: [10, doc => {
+              for (const node of document.querySelectorAll('script[type^="math/tex"]')) {
+                const display = !!node.type.match(/; *mode=display/)
+                const math = new doc.options.MathItem(node.textContent, doc.inputJax[0], display)
+                const text = document.createTextNode('')
+                node.parentNode.replaceChild(text, node)
+                math.start = {node: text, delim: '', n: 0}
+                math.end = {node: text, delim: '', n: 0}
+                doc.math.push(math)
+              }
+            }, '']
+          }
+        }
+      }
+
+      const script = document.createElement('script')
+      script.src = 'https://cdn.jsdelivr.net/npm/mathjax@4.1.0/tex-mml-chtml.min.js'
+      script.id = 'MathJax-script'
+      script.async = true
+      document.head.appendChild(script)
+    } else {
+      MathJax.startup.document.state(0)
+      MathJax.texReset()
+      MathJax.typesetPromise()
+    }
+  }
+
+  btf.addGlobalFn('encrypt', loadMathjax, 'mathjax')
+  window.pjax ? loadMathjax() : window.addEventListener('load', loadMathjax)
+})()</script></div><div class="aplayer no-destroy" data-id="2166217715" data-server="netease" data-type="song" data-fixed="true" data-mini="true" data-listFolded="false" data-order="random" data-lrctype="1" data-preload="none" data-autoplay="false" muted></div><canvas class="fireworks" mobile="false"></canvas><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/dist/fireworks.min.js"></script><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.js"></script><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/metingjs/dist/Meting.min.js"></script><script>(() => {
+  const destroyAplayer = () => {
+    if (window.aplayers) {
+      for (let i = 0; i < window.aplayers.length; i++) {
+        if (!window.aplayers[i].options.fixed) {
+          window.aplayers[i].destroy()
+        }
+      }
+    }
+  }
+
+  const runMetingJS = () => {
+    typeof loadMeting === 'function' && document.getElementsByClassName('aplayer').length && loadMeting()
+  }
+
+  btf.addGlobalFn('pjaxSend', destroyAplayer, 'destroyAplayer')
+  btf.addGlobalFn('pjaxComplete', loadMeting, 'runMetingJS')
+})()</script><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js" defer="defer"></script><script>document.addEventListener('DOMContentLoaded', () => {
+  const pjaxSelectors = ["head > title","#config-diff","#body-wrap","#rightside-config-hide","#rightside-config-show",".js-pjax"]
+
+  window.pjax = new Pjax({
+    elements: 'a:not([target="_blank"])',
+    selectors: pjaxSelectors,
+    cacheBust: false,
+    analytics: false,
+    scrollRestoration: false
+  })
+
+  const triggerPjaxFn = (val) => {
+    if (!val) return
+    Object.values(val).forEach(fn => {
+      try {
+        fn()
+      } catch (err) {
+        console.debug('Pjax callback failed:', err)
+      }
+    })
+  }
+
+  document.addEventListener('pjax:send', () => {
+    // removeEventListener
+    btf.removeGlobalFnEvent('pjaxSendOnce')
+    btf.removeGlobalFnEvent('themeChange')
+
+    // reset readmode
+    const $bodyClassList = document.body.classList
+    if ($bodyClassList.contains('read-mode')) $bodyClassList.remove('read-mode')
+
+    triggerPjaxFn(window.globalFn.pjaxSend)
+  })
+
+  document.addEventListener('pjax:complete', () => {
+    btf.removeGlobalFnEvent('pjaxCompleteOnce')
+    document.querySelectorAll('script[data-pjax]').forEach(item => {
+      const newScript = document.createElement('script')
+      const content = item.text || item.textContent || item.innerHTML || ""
+      Array.from(item.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value))
+      newScript.appendChild(document.createTextNode(content))
+      item.parentNode.replaceChild(newScript, item)
+    })
+
+    triggerPjaxFn(window.globalFn.pjaxComplete)
+  })
+
+  document.addEventListener('pjax:error', e => {
+    if (e.request.status === 404) {
+      false
+        ? pjax.loadUrl('/404.html')
+        : window.location.href = e.request.responseURL
+    }
+  })
+})</script><script async data-pjax src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script></div></body></html>

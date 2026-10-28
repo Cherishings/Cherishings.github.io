@@ -1,0 +1,734 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1.0,viewport-fit=cover"><title>机器人强化学习中的 PPO：从价值估计到策略更新 | Xi Zeng's Blog</title><meta name="author" content="Xi Zeng"><meta name="copyright" content="Xi Zeng"><meta name="format-detection" content="telephone=no"><meta name="theme-color" content="#ffffff"><meta name="description" content="从回报与 Bellman 方程推导 TD 误差、优势函数和 GAE，解释 PPO 为什么更新策略参数、怎样限制更新，以及它在并行机器人训练中的优势与局限，并与 TRPO、SAC 对照。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="机器人强化学习中的 PPO：从价值估计到策略更新">
+<meta property="og:url" content="https://cherishxi.xyz/2026/05/29/trpo-ppo-sac-robot-control/index.html">
+<meta property="og:site_name" content="Xi Zeng&#39;s Blog">
+<meta property="og:description" content="从回报与 Bellman 方程推导 TD 误差、优势函数和 GAE，解释 PPO 为什么更新策略参数、怎样限制更新，以及它在并行机器人训练中的优势与局限，并与 TRPO、SAC 对照。">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://cherishxi.xyz/img/photo.JPG">
+<meta property="article:published_time" content="2026-05-29T14:18:43.000Z">
+<meta property="article:modified_time" content="2026-10-27T16:00:00.000Z">
+<meta property="article:author" content="Xi Zeng">
+<meta property="article:tag" content="PPO">
+<meta property="article:tag" content="SAC">
+<meta property="article:tag" content="TRPO">
+<meta property="article:tag" content="强化学习">
+<meta property="article:tag" content="机器人控制">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://cherishxi.xyz/img/photo.JPG"><script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "机器人强化学习中的 PPO：从价值估计到策略更新",
+  "url": "https://cherishxi.xyz/2026/05/29/trpo-ppo-sac-robot-control/",
+  "image": "https://cherishxi.xyz/img/photo.JPG",
+  "datePublished": "2026-05-29T14:18:43.000Z",
+  "dateModified": "2026-10-27T16:00:00.000Z",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "Xi Zeng",
+      "url": "https://cherishxi.xyz"
+    }
+  ]
+}</script><link rel="shortcut icon" href="/img/logo.JPG"><link rel="canonical" href="https://cherishxi.xyz/2026/05/29/trpo-ppo-sac-robot-control/index.html"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><link rel="stylesheet" href="/css/index.css?v=5.5.4"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.1.0/css/all.min.css"><script>
+    (() => {
+      
+    const saveToLocal = {
+      set: (key, value, ttl) => {
+        if (!ttl) return
+        const expiry = Date.now() + ttl * 86400000
+        localStorage.setItem(key, JSON.stringify({ value, expiry }))
+      },
+      get: key => {
+        const itemStr = localStorage.getItem(key)
+        if (!itemStr) return undefined
+        const { value, expiry } = JSON.parse(itemStr)
+        if (Date.now() > expiry) {
+          localStorage.removeItem(key)
+          return undefined
+        }
+        return value
+      }
+    }
+
+    window.btf = {
+      saveToLocal,
+      getScript: (url, attr = {}) => new Promise((resolve, reject) => {
+        const script = document.createElement('script')
+        script.src = url
+        script.async = true
+        Object.entries(attr).forEach(([key, val]) => script.setAttribute(key, val))
+        script.onload = script.onreadystatechange = () => {
+          if (!script.readyState || /loaded|complete/.test(script.readyState)) resolve()
+        }
+        script.onerror = reject
+        document.head.appendChild(script)
+      }),
+      getCSS: (url, id) => new Promise((resolve, reject) => {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = url
+        if (id) link.id = id
+        link.onload = link.onreadystatechange = () => {
+          if (!link.readyState || /loaded|complete/.test(link.readyState)) resolve()
+        }
+        link.onerror = reject
+        document.head.appendChild(link)
+      }),
+      addGlobalFn: (key, fn, name = false, parent = window) => {
+        if (!true && key.startsWith('pjax')) return
+        const globalFn = parent.globalFn || {}
+        globalFn[key] = globalFn[key] || {}
+        globalFn[key][name || Object.keys(globalFn[key]).length] = fn
+        parent.globalFn = globalFn
+      }
+    }
+  
+      
+      const activateDarkMode = () => {
+        document.documentElement.setAttribute('data-theme', 'dark')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d0d0d')
+        }
+      }
+      const activateLightMode = () => {
+        document.documentElement.setAttribute('data-theme', 'light')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
+        }
+      }
+
+      btf.activateDarkMode = activateDarkMode
+      btf.activateLightMode = activateLightMode
+
+      const theme = saveToLocal.get('theme')
+    
+          theme === 'dark' ? activateDarkMode() : theme === 'light' ? activateLightMode() : null
+        
+      
+      const asideStatus = saveToLocal.get('aside-status')
+      if (asideStatus !== undefined) {
+        document.documentElement.classList.toggle('hide-aside', asideStatus === 'hide')
+      }
+    
+      
+    const detectApple = () => {
+      if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent)) {
+        document.documentElement.classList.add('apple')
+      }
+    }
+    detectApple()
+  
+    })()
+  </script><script>const GLOBAL_CONFIG = {
+  root: '/',
+  algolia: undefined,
+  localSearch: undefined,
+  translate: {"defaultEncoding":2,"translateDelay":0,"msgToTraditionalChinese":"繁","msgToSimplifiedChinese":"簡"},
+  highlight: {"plugin":"highlight.js","highlightCopy":true,"highlightLang":true,"highlightHeightLimit":false,"highlightFullpage":false,"highlightMacStyle":false},
+  copy: {
+    success: '复制成功',
+    error: '复制失败',
+    noSupport: '浏览器不支持'
+  },
+  relativeDate: {
+    homepage: false,
+    post: false
+  },
+  runtime: '',
+  dateSuffix: {
+    just: '刚刚',
+    min: '分钟前',
+    hour: '小时前',
+    day: '天前',
+    month: '个月前'
+  },
+  copyright: undefined,
+  lightbox: 'null',
+  Snackbar: undefined,
+  infinitegrid: {
+    js: 'https://cdn.jsdelivr.net/npm/@egjs/infinitegrid@4.13.0/dist/infinitegrid.min.js',
+    buttonText: '加载更多'
+  },
+  isPhotoFigcaption: false,
+  islazyloadPlugin: false,
+  isAnchor: false,
+  percent: {
+    toc: true,
+    rightside: true,
+  },
+  autoDarkmode: false
+}</script><script id="config-diff">var GLOBAL_CONFIG_SITE = {
+  title: '机器人强化学习中的 PPO：从价值估计到策略更新',
+  isHighlightShrink: false,
+  isToc: true,
+  pageType: 'post'
+}</script><style>.aplayer.aplayer-fixed{opacity:0.08 !important;transition:opacity 0.4s ease !important;} .aplayer.aplayer-fixed:hover{opacity:1 !important;}</style><style>#web_bg::after{content:'';position:fixed;inset:0;background:rgba(8,8,22,0.5);pointer-events:none;z-index:0;} #footer{background-color:#574E91 !important;} #page-header:not(.full_page){background:transparent !important;} .recent-post-item,.card-widget{background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border:1px solid transparent !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;color:#1a1a2e !important;transition:transform 0.3s ease,box-shadow 0.3s ease !important;background-clip:padding-box !important;outline:1.5px solid transparent;position:relative;} .recent-post-item::before,.card-widget::before{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;} .recent-post-item:hover,.card-widget:hover{transform:translateY(-4px) !important;box-shadow:0 12px 36px rgba(80,120,255,0.25) !important;} .recent-post-item a,.card-widget a{color:#3a5a8a !important;} .recent-post-item .article-meta,.card-widget .article-meta{color:#555 !important;}</style><style>.type-tags #page{background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;padding:60px 50px !important;position:relative;overflow:hidden} .type-tags #page::before{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-tags .tag-cloud-list{padding:10px 0;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:12px} .type-tags .tag-cloud-list a{font-size:1.05em !important;padding:10px 24px !important;border-radius:30px !important;margin:0 !important;font-weight:700 !important;letter-spacing:0.06em !important;text-shadow:0 1px 3px rgba(0,0,0,0.18) !important;transition:transform 0.25s,box-shadow 0.25s !important} .type-tags .tag-cloud-list a:hover{transform:translateY(-4px) scale(1.08) !important;box-shadow:0 10px 28px rgba(0,0,0,0.28) !important;filter:brightness(1.1)} .type-tags .tag-cloud-item.tag-color-0{background:linear-gradient(135deg,#4a90d9,#357abd) !important;box-shadow:0 4px 14px rgba(74,144,217,0.45) !important} .type-tags .tag-cloud-item.tag-color-1{background:linear-gradient(135deg,#7c4dbd,#5e35b1) !important;box-shadow:0 4px 14px rgba(124,77,189,0.45) !important} .type-tags .tag-cloud-item.tag-color-2{background:linear-gradient(135deg,#2eb88a,#1a9970) !important;box-shadow:0 4px 14px rgba(46,184,138,0.45) !important} .type-tags .tag-cloud-item.tag-color-3{background:linear-gradient(135deg,#e06c75,#c0392b) !important;box-shadow:0 4px 14px rgba(224,108,117,0.45) !important} .type-tags .tag-cloud-item.tag-color-4{background:linear-gradient(135deg,#d4954a,#b8732a) !important;box-shadow:0 4px 14px rgba(212,149,74,0.45) !important} .type-tags .tag-cloud-item.tag-color-5{background:linear-gradient(135deg,#5b8dee,#3a6fd8) !important;box-shadow:0 4px 14px rgba(91,141,238,0.45) !important} .type-tags .tag-cloud-item.tag-color-6{background:linear-gradient(135deg,#c96db5,#a84d99) !important;box-shadow:0 4px 14px rgba(201,109,181,0.45) !important} .type-tags .tag-cloud-item.tag-color-7{background:linear-gradient(135deg,#3aacb8,#228b96) !important;box-shadow:0 4px 14px rgba(58,172,184,0.45) !important}</style><style>.type-categories #page{background:transparent !important;backdrop-filter:none !important;box-shadow:none !important;border:none !important;padding:0 !important} .type-categories #page::before{display:none} .type-categories .category-lists{padding:0} .type-categories .category-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:20px} .type-categories .category-list>.category-list-item{width:100%;max-width:100%;list-style:none;background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border:1px solid transparent !important;background-clip:padding-box !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;padding:28px 28px 20px !important;position:relative;transition:transform 0.3s ease,box-shadow 0.3s ease !important;color:#1a1a2e !important} .type-categories .category-list>.category-list-item::before{display:none !important} .type-categories .category-list>.category-list-item::after{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-categories .category-list-child .category-list-item::before{display:none !important} .type-categories .category-list>.category-list-item:hover{transform:translateY(-4px) !important;box-shadow:0 12px 36px rgba(80,120,255,0.25) !important} .type-categories .category-list>.category-list-item>.category-list-link{display:block;font-size:1.25em;font-weight:800;color:#1a1a2e !important;letter-spacing:0.04em;margin-bottom:6px} .type-categories .category-list>.category-list-item>.category-list-link:hover{color:#4a90d9 !important} .type-categories .category-list>.category-list-item>.category-list-count{display:block;font-size:0.82em;color:#888 !important;font-weight:400;margin-bottom:16px} .type-categories .category-list>.category-list-item>.category-list-count::before{content:'共 '} .type-categories .category-list>.category-list-item>.category-list-count::after{content:' 篇'} .type-categories .category-list-child{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px} .type-categories .category-list-child .category-list-item{flex:0 0 auto;list-style:none} .type-categories .category-list-child .category-list-link{display:inline-block;padding:8px 20px;border-radius:24px;background:linear-gradient(135deg,rgba(91,141,238,0.15),rgba(124,77,189,0.12));color:#3a5a8a !important;font-size:1.05em;font-weight:700;border:1.5px solid rgba(91,141,238,0.3);transition:all 0.2s} .type-categories .category-list-child .category-list-link:hover{background:linear-gradient(135deg,#5b8dee,#7c4dbd) !important;color:#fff !important;border-color:transparent;transform:translateY(-2px);box-shadow:0 4px 12px rgba(91,141,238,0.35)} .type-categories .category-list-child .category-list-count{display:none}</style><style>.type-about #web_bg{display:none !important;} body.type-about{background:url('/img/dream.JPG') center center / cover no-repeat fixed !important;} .type-about #page{background:rgba(10,10,30,0.65) !important;backdrop-filter:blur(18px) !important;-webkit-backdrop-filter:blur(18px) !important;border-radius:16px !important;box-shadow:0 6px 32px rgba(0,0,0,0.6) !important;padding:60px 50px !important;position:relative;overflow:hidden;color:#e8eaf6 !important} .type-about #page::before{content:'';position:absolute;inset:0;border-radius:16px;padding:2px;background:linear-gradient(135deg,rgba(160,120,255,0.7),rgba(80,160,255,0.5),rgba(140,100,255,0.6));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-about #page h2{color:#c8b4ff !important;font-size:1.6em !important;} .type-about #page p,.type-about #page li{color:#d0d8f0 !important;font-size:1.12em !important;line-height:1.9 !important;} .type-about #page strong{color:#b0c8ff !important;} .type-about #page a{color:#90caf9 !important;}</style><style>.type-link #page{background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;padding:60px 50px !important;position:relative;overflow:hidden} .type-link #page::before{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-link .flink-list-item{position:relative;background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border:1px solid transparent !important;background-clip:padding-box !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;transition:transform 0.3s ease,box-shadow 0.3s ease !important;overflow:visible !important} .type-link .flink-list-item::after{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-link .flink-list-item:hover{transform:translateY(-4px) !important;box-shadow:0 12px 36px rgba(80,120,255,0.25) !important}</style><meta name="generator" content="Hexo 8.1.1"></head><body><div class="bg-animation" id="web_bg" style="background-image: url(/img/background.JPG);"></div><div id="sidebar"><div id="menu-mask"></div><div id="sidebar-menus"><div class="avatar-img text-center"><img src="/img/photo.JPG" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="site-data text-center"><a href="/archives/"><div class="headline">文章</div><div class="length-num">14</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">32</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">14</div></a></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 主页</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 专栏</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 主题</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-user"></i><span> 关于</span></a></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友情链接</span></a></div></div></div></div><div class="post" id="body-wrap"><header class="post-bg" id="page-header"><nav id="nav"><span id="blog-info"><a class="nav-site-title" href="/"><img class="site-icon" src="/img/logo.JPG" alt="Logo"><span class="site-name">Xi Zeng's Blog</span></a><a class="nav-page-title" href="/"><span class="site-name">机器人强化学习中的 PPO：从价值估计到策略更新</span><span class="site-name"><i class="fa-solid fa-circle-arrow-left"></i><span>  返回首页</span></span></a></span><div id="menus"><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 主页</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 专栏</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 主题</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-user"></i><span> 关于</span></a></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友情链接</span></a></div></div><div id="toggle-menu"><span class="site-page"><i class="fas fa-bars fa-fw"></i></span></div></div></nav><div id="post-info"><h1 class="post-title">机器人强化学习中的 PPO：从价值估计到策略更新</h1><div id="post-meta"><div class="meta-firstline"><span class="post-meta-date"><i class="far fa-calendar-alt fa-fw post-meta-icon"></i><span class="post-meta-label">发表于</span><time class="post-meta-date-created" datetime="2026-05-29T14:18:43.000Z" title="发表于 2026-05-29 22:18:43">2026-05-29</time><span class="post-meta-separator">|</span><i class="fas fa-history fa-fw post-meta-icon"></i><span class="post-meta-label">更新于</span><time class="post-meta-date-updated" datetime="2026-10-27T16:00:00.000Z" title="更新于 2026-10-28 00:00:00">2026-10-28</time></span><span class="post-meta-categories"><span class="post-meta-separator">|</span><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/%E7%90%86%E8%AE%BA%E4%B8%8E%E6%96%B9%E6%B3%95/">理论与方法</a><i class="fas fa-angle-right post-meta-separator"></i><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/%E7%90%86%E8%AE%BA%E4%B8%8E%E6%96%B9%E6%B3%95/%E5%BC%BA%E5%8C%96%E5%AD%A6%E4%B9%A0/">强化学习</a></span></div><div class="meta-secondline"><span class="post-meta-separator">|</span><span class="post-meta-wordcount"><i class="far fa-file-word fa-fw post-meta-icon"></i><span class="post-meta-label">总字数:</span><span class="word-count">12.2k</span><span class="post-meta-separator">|</span><i class="far fa-clock fa-fw post-meta-icon"></i><span class="post-meta-label">阅读时长:</span><span>42分钟</span></span><span class="post-meta-separator">|</span><span class="post-meta-pv-cv" id="" data-flag-title=""><i class="far fa-eye fa-fw post-meta-icon"></i><span class="post-meta-label">浏览量:</span><span id="busuanzi_value_page_pv"><i class="fa-solid fa-spinner fa-spin"></i></span></span></div></div></div></header><main class="layout" id="content-inner"><div id="post"><article class="container post-content" id="article-container"><p>机器人执行动作，环境返回奖励；优化器更新的却是策略网络参数。奖励怎样变成参数的梯度，中间要经过回报、价值估计和优势函数。理解这条计算过程后，才能说清 GAE 改善了什么、PPO 的裁剪限制了什么，以及为什么它适合大量并行的机器人仿真训练。</p>
+<p>本文按基本概念、Bellman 方程、TD、策略梯度和 Actor–Critic 的顺序展开，参考赵世钰老师《强化学习的数学原理》的讲解脉络。数值例子独立编写；TRPO、PPO 与 SAC 放在同一条参数更新主线上对照，较长的实现推导折叠供选读。<a target="_blank" rel="noopener" href="https://github.com/MathFoundationRL/Book-Mathematical-Foundation-of-Reinforcement-Learning">教材与课程官方入口</a></p>
+<h2 id="1-状态、动作、策略与参数，各是什么"><a href="#1-状态、动作、策略与参数，各是什么" class="headerlink" title="1. 状态、动作、策略与参数，各是什么"></a>1. 状态、动作、策略与参数，各是什么</h2><p>设机器人正在站立。当前身体倾斜角、关节角和速度等信息组成状态 s；策略根据这些信息，选择一个动作 a，机器人执行后得到下一状态和一个即时奖励 r。这一条记录就是：</p>
+<script type="math/tex; mode=display">
+(s_t,a_t,r_t,s_{t+1}).</script><p>下标 t 表示第几步。本文把“执行动作后得到的奖励”记为 <code>r_t</code>，有些教材将同一个奖励记为 <code>r_&#123;t+1&#125;</code>，只是编号约定不同。</p>
+<p><strong>策略是选择动作的规则，参数是这个规则内部可以学习的数值。</strong> 对随机策略，用下面的记号表示：</p>
+<script type="math/tex; mode=display">
+a_t\sim\pi_\theta(\cdot|s_t).</script><p>其中 pi 表示策略，theta 表示神经网络的权重和偏置；竖线表示“给定当前状态”。符号 <code>~</code> 表示从分布中采样。策略可以认为在某个状态下两个动作各有一半机会，也可以输出连续动作的高斯分布。</p>
+<p>动作是某一次决策的结果。网络参数改变后，<strong>以后遇到状态时的动作分布会改变</strong>；已经执行过的那个动作，仍然是经验记录中的原值。后面会把这个区别算出来。</p>
+<p>为了先讲清数学，前半篇假定状态可以完整观察。真实机器人 actor 一般只能看到观测 o，例如编码器、IMU 和动作历史；训练 critic 可以额外获得仿真状态。这个信息差在工程中要处理，暂时不与价值函数的定义混在一起。</p>
+<h2 id="2-Reward-是一步评分，Return-是往后累计的评分"><a href="#2-Reward-是一步评分，Return-是往后累计的评分" class="headerlink" title="2. Reward 是一步评分，Return 是往后累计的评分"></a>2. Reward 是一步评分，Return 是往后累计的评分</h2><p>机器人这一刻得到 +1，不意味着这个动作长期合算。例如迈大步可能立刻提高速度奖励，却在几步以后导致摔倒。因此要累计往后的奖励，得到回报 G：</p>
+<script type="math/tex; mode=display">
+G_t=r_t+\gamma r_{t+1}+\gamma^2r_{t+2}+\cdots.</script><p>gamma 是折扣因子，通常位于 0 与 1 之间。它决定较远奖励在当前计算中占多大分量，不是学习率。</p>
+<p>举一个纯数值例子：一段回合还剩三次奖励 <code>1、2、3</code>，之后结束，取 gamma=0.9。则：</p>
+<script type="math/tex; mode=display">
+G_0=1+0.9\times2+0.9^2\times3=5.23.</script><p>这里 r_0=1，G_0=5.23。两者回答不同的问题：一个是这一步拿到多少，另一个是从这一步开始，后面总共拿到多少。</p>
+<p>把第一项拿出来，可以直接得到一个以后反复使用的关系：</p>
+<script type="math/tex; mode=display">
+G_t=r_t+\gamma G_{t+1}.</script><p>它没有增加任何假设，只是把同一个和式重新分组。Bellman 方程就是从这里接上条件期望。</p>
+<h2 id="3-V-和-Q-为什么要分成两个函数"><a href="#3-V-和-Q-为什么要分成两个函数" class="headerlink" title="3. V 和 Q 为什么要分成两个函数"></a>3. V 和 Q 为什么要分成两个函数</h2><h3 id="V：处在这个状态，按当前策略继续，平均能拿多少"><a href="#V：处在这个状态，按当前策略继续，平均能拿多少" class="headerlink" title="V：处在这个状态，按当前策略继续，平均能拿多少"></a>V：处在这个状态，按当前策略继续，平均能拿多少</h3><p>即使从同一站姿出发，策略可能选到不同动作，接触结果也可能有随机性，所以一次实际回报 G 不能代表所有情况。对它取平均，得到状态价值：</p>
+<script type="math/tex; mode=display">
+V^\pi(s)=\mathbb E_\pi[G_t\mid s_t=s].</script><p>期望可以先理解为“按发生概率加权平均”；右上角 pi 提醒我们，<strong>这个平均水平属于某个策略</strong>。同一个站姿，交给不同控制策略，往后的平均回报可以不同。</p>
+<h3 id="Q：这个状态下先指定一个动作，再按当前策略继续，平均能拿多少"><a href="#Q：这个状态下先指定一个动作，再按当前策略继续，平均能拿多少" class="headerlink" title="Q：这个状态下先指定一个动作，再按当前策略继续，平均能拿多少"></a>Q：这个状态下先指定一个动作，再按当前策略继续，平均能拿多少</h3><p>动作价值比 V 多固定了第一步动作：</p>
+<script type="math/tex; mode=display">
+Q^\pi(s,a)=\mathbb E_\pi[G_t\mid s_t=s,a_t=a].</script><p>“指定第一步动作”不表示以后每步都重复这个动作。第一步之后，仍由 pi 决策。</p>
+<p>下面用一个只有两种动作的简化决策贯穿全文。它是计算例子，不是某个真实机器人的训练结果。在状态 s，下列两条路径的结果是确定的：</p>
+<ul>
+<li>动作 a₊：这一刻奖励 1，进入下一状态 s₁；随后得到奖励 10，回合结束。仍取 gamma=0.9，因此 Q(s,a₊)=1+0.9×10=10。</li>
+<li>动作 a₋：立即得到奖励 6，回合结束，因此 Q(s,a₋)=6。</li>
+</ul>
+<p>当前策略在 s 下各用 50% 的概率选择这两个动作，那么：</p>
+<script type="math/tex; mode=display">
+V^\pi(s)=0.5\times10+0.5\times6=8.</script><p>所以 V=8 不是第三种动作的评分，而是<strong>当前选动作规则下的平均水平</strong>。一般地，离散动作满足：</p>
+<script type="math/tex; mode=display">
+V^\pi(s)=\sum_a\pi(a|s)Q^\pi(s,a).</script><p>连续动作把求和换成积分，含义相同。还可以注意到：a₊ 的即时奖励只有 1，却比即时奖励为 6 的 a₋ 更值得选。只拿当前 reward 评价动作，会在这里判断反了。</p>
+<h2 id="4-Bellman-方程怎样从回报推出来"><a href="#4-Bellman-方程怎样从回报推出来" class="headerlink" title="4. Bellman 方程怎样从回报推出来"></a>4. Bellman 方程怎样从回报推出来</h2><p>刚才已经有 <code>G_t = r_t + gamma × G_&#123;t+1&#125;</code>。现在问“处在 s，按 pi 继续，平均得到多少”，就是在等式两边取对应的条件期望：</p>
+<script type="math/tex; mode=display">
+V^\pi(s)=\mathbb E_\pi\left[r_t+\gamma V^\pi(s_{t+1})\mid s_t=s\right].</script><p>右侧先选动作，再由环境产生奖励与下一状态，因此平均包含策略和环境两部分随机性。它的意思是：<strong>当前状态的价值，等于眼前奖励加上下一状态价值的折扣平均。</strong></p>
+<p>如果把第一步动作也固定，得到：</p>
+<script type="math/tex; mode=display">
+Q^\pi(s,a)=\mathbb E\left[r_t+\gamma V^\pi(s_{t+1})\mid s_t=s,a_t=a\right].</script><p>沿用 a₊ 的路径：s₁ 后面还有一次奖励 10，所以 V(s₁)=10；当前动作价值就是 <code>1 + 0.9 × 10 = 10</code>。</p>
+<p>Bellman 方程提供了“如何把相邻时刻的价值联系起来”的规则。它不是另给价值贴一个定义，也不是知道下一状态之后，就已经知道了整个未来。实际算法仍要估计右侧的 V。</p>
+<h2 id="5-不知道真实-V，critic-怎么学：从-MC-到-TD-error"><a href="#5-不知道真实-V，critic-怎么学：从-MC-到-TD-error" class="headerlink" title="5. 不知道真实 V，critic 怎么学：从 MC 到 TD error"></a>5. 不知道真实 V，critic 怎么学：从 MC 到 TD error</h2><h3 id="等回合结束再评分：Monte-Carlo"><a href="#等回合结束再评分：Monte-Carlo" class="headerlink" title="等回合结束再评分：Monte Carlo"></a>等回合结束再评分：Monte Carlo</h3><p>前面 V 和 Q 的定义都包含平均未来回报。一个直接方法是多跑几次，记录每次真实发生的 G，再让网络拟合这些回报。这个价值网络通常称为 critic，用 phi 表示它的参数：</p>
+<script type="math/tex; mode=display">
+V_\phi(s)\approx V^\pi(s),\qquad
+L_{\mathrm{MC}}=\frac12\left(V_\phi(s_t)-G_t\right)^2.</script><p>例如真的执行 a₊，看到后续奖励 <code>1、10</code>，就能算出 G_0=10，拿它作为本次拟合目标。另一回合执行 a₋，目标为 6；两个动作各占一半时，同一状态的平方误差回归会趋向平均值 8。</p>
+<p>这种方法要等后面的奖励发生，而且不同回合的累计结果可能波动很大。</p>
+<h3 id="只等一步：Temporal-Difference"><a href="#只等一步：Temporal-Difference" class="headerlink" title="只等一步：Temporal Difference"></a>只等一步：Temporal Difference</h3><p>Bellman 方程提示我们：既然还没看到完整未来，可以先用下一状态的价值估计代替它。用这一步真实奖励，加上下一状态的估计，构成 TD target：</p>
+<script type="math/tex; mode=display">
+y_t^{\mathrm{TD}}=r_t+\gamma V_\phi(s_{t+1}).</script><p>再用“新目标减旧预测”，得到 TD error：</p>
+<script type="math/tex; mode=display">
+\delta_t=y_t^{\mathrm{TD}}-V_\phi(s_t)
+=r_t+\gamma V_\phi(s_{t+1})-V_\phi(s_t).</script><p>TD 是 temporal difference，指利用相邻时刻的价值关系更新估计。它不只是 <code>下一步 V − 当前 V</code>，还必须包括眼前奖励和折扣。</p>
+<p>例如当前估计 V(s)=8、下一状态估计 V(s₁)=9。这次执行 a₊，得到 r=1，则 TD target 为 <code>1 + 0.9 × 9 = 9.1</code>，TD error 为 <code>9.1 − 8 = 1.1</code>。这条经验告诉 critic：这次观察得到的目标，比刚才的预测高 1.1。</p>
+<p>如果 V 直接存成表格，最简单的 TD 更新就是：</p>
+<script type="math/tex; mode=display">
+V(s_t)\leftarrow V(s_t)+\alpha\delta_t.</script><p>取学习率 alpha=0.1，表格中的 8 会变为 8.11。换成神经网络，则通过回归损失更新 phi：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 每个样本对应一个标量，张量形状均为 [B]</span></span><br><span class="line"><span class="keyword">with</span> torch.no_grad():</span><br><span class="line">    target = reward + gamma * bootstrap_mask * critic(next_obs).squeeze(-<span class="number">1</span>)</span><br><span class="line">value = critic(obs).squeeze(-<span class="number">1</span>)</span><br><span class="line">critic_loss = <span class="number">0.5</span> * (value - target).square().mean()</span><br><span class="line">critic_optimizer.zero_grad()</span><br><span class="line">critic_loss.backward()</span><br><span class="line">critic_optimizer.step()</span><br></pre></td></tr></table></figure>
+<p><code>no_grad</code> 的意思是这一步更新把 target 当成固定评分目标。critic 当前的预测向它靠近，而不是同时反向修改 target。用一个估计帮助更新另一个估计，称为 bootstrap；它节省了等待完整回合的成本，也把下一状态估计的误差带进了目标。</p>
+<p>这里 a₊ 的真实回报是 10，TD target 却是 9.1，正是因为下一状态被低估了。<strong>TD target 不是自动正确的真值。</strong> 需要通过持续采样和价值更新逐步改善估计。</p>
+<p>真实终止后没有未来价值，bootstrap_mask 应为 0；只是采样时间到、任务本来还会继续时，情况不同，后面再处理。</p>
+<h2 id="6-优势函数-A-从哪里来"><a href="#6-优势函数-A-从哪里来" class="headerlink" title="6. 优势函数 A 从哪里来"></a>6. 优势函数 A 从哪里来</h2><p>动作价值 Q 告诉我们“这样选平均有多少回报”，状态价值 V 告诉我们“当前策略通常有多少回报”。两者相减，就能比较这次选择相对通常水平好多少：</p>
+<script type="math/tex; mode=display">
+A^\pi(s,a)=Q^\pi(s,a)-V^\pi(s).</script><p>沿用 Q(a₊)=10、Q(a₋)=6、V=8 的例子：</p>
+<script type="math/tex; mode=display">
+A(s,a_+)=10-8=2,\qquad A(s,a_-)=6-8=-2.</script><p>正优势表示高于当前平均水平，负优势表示低于当前平均水平。a₋ 的奖励是正数、Q 也是正数，但优势仍然为负；因此“有奖励就多做”不是正确的更新规则。</p>
+<h3 id="为什么-TD-error-能拿来估计优势"><a href="#为什么-TD-error-能拿来估计优势" class="headerlink" title="为什么 TD error 能拿来估计优势"></a>为什么 TD error 能拿来估计优势</h3><p>从动作价值的 Bellman 方程减去 V(s)：</p>
+<script type="math/tex; mode=display">
+A^\pi(s,a)=\mathbb E\left[
+ r_t+\gamma V^\pi(s_{t+1})-V^\pi(s_t)
+ \mid s_t=s,a_t=a\right].</script><p>括号里的量正是使用真实 V 时的一步 TD error。因此，<strong>给定状态和动作，TD error 的条件平均等于优势</strong>。</p>
+<p>要区分三个层次：A 是一个条件期望；某一次 delta 是一条经验产生的样本；代码中的 V 又只是 critic 的估计。所以实际 delta 会包含环境随机性和价值估计误差，不能说“每次 delta 都精确等于 A”。</p>
+<p>如果下一状态估计准确，为 10，这条 a₊ 样本的 delta 就是 <code>1 + 0.9 × 10 − 8 = 2</code>。刚才下一状态被估成 9，delta 才变成 1.1。这也解释了为什么 actor 的学习质量依赖 critic。</p>
+<h2 id="7-GAE：把后面几步的-TD-error-也利用起来"><a href="#7-GAE：把后面几步的-TD-error-也利用起来" class="headerlink" title="7. GAE：把后面几步的 TD error 也利用起来"></a>7. GAE：把后面几步的 TD error 也利用起来</h2><p>只用一步 delta，下一状态估计不准时会受影响。等到回合结束再用完整回报，又可能有更大的采样波动。GAE 用衰减权重把后面的 TD error 累加：</p>
+<script type="math/tex; mode=display">
+\hat A_t^{\mathrm{GAE}}=
+\delta_t+\gamma\lambda\delta_{t+1}
++(\gamma\lambda)^2\delta_{t+2}+\cdots.</script><p>帽子表示估计值。gamma 仍是奖励的时间折扣；lambda 是另一个参数，用来控制后续 TD error 参与多少。lambda=0 时只保留当前 delta。对于一条完整结束的轨迹，lambda=1 时，各个 V 项会抵消，得到实际回报减当前价值估计；在相同估计与采样设置下，这是典型的偏差与方差折中，不能把某个 lambda 说成普遍最优。</p>
+<p>继续用同一条 a₊ 轨迹：奖励为 <code>1、10</code>，critic 估计为 <code>8、9</code>，第二步结束。取 gamma=0.9、lambda=0.95：</p>
+<script type="math/tex; mode=display">
+\delta_0=1+0.9\times9-8=1.1,\qquad
+\delta_1=10-9=1,</script><script type="math/tex; mode=display">
+\hat A_0=1.1+0.9\times0.95\times1=1.955.</script><p>一步 TD 只给出 1.1；后一步的 +1 说明 s₁ 原来被低估了，GAE 把一部分修正传回前面。若 lambda=1，则得到 <code>1.1 + 0.9 = 2</code>，正好是这次实际回报 10 减当前预测 8。</p>
+<h3 id="这些权重为什么这样取"><a href="#这些权重为什么这样取" class="headerlink" title="这些权重为什么这样取"></a>这些权重为什么这样取</h3><p>还可以从“用几步奖励来评分”理解同一个计算。本例只有两步，因此有两种估计：一步估计用真实奖励 1，再接 critic 预测的 9；两步估计用真实奖励 1、10，一直看到终止：</p>
+<script type="math/tex; mode=display">
+\hat A_0^{(1)}=1+0.9\times9-8=1.1,\qquad
+\hat A_0^{(2)}=1+0.9\times10-8=2.</script><p>两步估计在本例中更准，但实际任务的后续奖励会随接触、随机扰动和探索动作变化，等得越久不一定越可靠。GAE 把不同步数的估计混合。在这条两步终止的轨迹上，权重分别是 1−lambda 和 lambda：</p>
+<script type="math/tex; mode=display">
+(1-\lambda)\hat A_0^{(1)}+\lambda\hat A_0^{(2)}
+=0.05\times1.1+0.95\times2=1.955.</script><p>它与上面的 TD error 累加完全相同，因为两步估计就是 <code>delta₀ + gamma × delta₁</code>。展开到更长的轨迹时，多步估计的权重按 lambda 衰减，整理后就得到前面的 GAE 和式；有限轨迹最后一项要保留剩余权重，并正确处理终止或 bootstrap。</p>
+<p>lambda 较小，更多依赖短步 critic 预测，通常采样波动较小，但更容易受价值估计偏差影响；lambda 较大，更多采用后面实际发生的奖励，减轻这种依赖，也可能带入更多轨迹噪声。<strong>GAE 改善的是“这次动作该怎样评分”的估计，不负责限制网络更新幅度，也不是 PPO 独有的组件。</strong></p>
+<p>训练 critic 的一个常见回报目标为：</p>
+<script type="math/tex; mode=display">
+\hat R_t=\hat A_t+V_{\mathrm{old}}(s_t).</script><p>本例中是 1.955+8=9.955。这里的 return 是由 GAE 构造的拟合目标，不要求与实际完整回报 10 完全相同。后面如果对 actor 使用的优势做标准化，应先保存这个 critic 目标，不能把标准化后的优势再加回 V。</p>
+<h3 id="代码为什么从后往前算"><a href="#代码为什么从后往前算" class="headerlink" title="代码为什么从后往前算"></a>代码为什么从后往前算</h3><p>上面的和式可以改写成递推：</p>
+<script type="math/tex; mode=display">
+\hat A_t=\delta_t+\gamma\lambda c_t\hat A_{t+1},\qquad
+\delta_t=r_t+\gamma b_tV(s_{t+1})-V(s_t).</script><p>最后一步之后的累计量已知，从后向前就能一次算完。b 决定是否对下一状态 bootstrap，c 决定是否沿着这条轨迹继续累计，两者用途不同：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># values / next_values 为采集时保存的预测；这里只计算固定目标</span></span><br><span class="line">last_gae = torch.zeros_like(values[<span class="number">0</span>])</span><br><span class="line"><span class="keyword">for</span> t <span class="keyword">in</span> <span class="built_in">reversed</span>(<span class="built_in">range</span>(horizon)):</span><br><span class="line">    delta = rewards[t] + gamma * bootstrap_mask[t] * next_values[t] - values[t]</span><br><span class="line">    last_gae = delta + gamma * lam * trace_mask[t] * last_gae</span><br><span class="line">    advantages[t] = last_gae</span><br><span class="line">returns = advantages + values</span><br><span class="line"><span class="comment"># returns 先保存，再单独标准化供 actor 使用的 advantages</span></span><br></pre></td></tr></table></figure>
+<p>机器人摔倒、任务真实结束时，b=0、c=0。回合只是达到时间上限、实际任务仍可继续时，通常 b=1、c=0：保留最终状态的价值，不能把 reset 后的新站姿接进旧回合。rollout 长度到头但回合没结束时，也要保留末状态 bootstrap。<a target="_blank" rel="noopener" href="https://arxiv.org/abs/1506.02438">GAE 原论文</a></p>
+<h2 id="8-为什么优化网络参数，而不是把-action-改好"><a href="#8-为什么优化网络参数，而不是把-action-改好" class="headerlink" title="8. 为什么优化网络参数，而不是把 action 改好"></a>8. 为什么优化网络参数，而不是把 action 改好</h2><p>现在已经有了某次执行记录，以及“这次选择相对平均水平怎样”的估计。接下来需要把这个评价用来改变选动作的规则。</p>
+<p>PPO 优化器持有的是 actor 的网络参数 theta。过去执行过的 a 是训练数据，给它改个数值，不会改掉机器人已经发生过的运动；而部署时机器人还会遇到其他状态，需要网络继续产生动作。</p>
+<p>用连续动作的最小例子看梯度。固定当前状态，只让策略的均值 mu 可训练，标准差 sigma=0.5 不训练；mu 就是这个玩具策略的唯一参数。采集时 mu=0，恰好采到了 a=0.5。其对数概率密度满足：</p>
+<script type="math/tex; mode=display">
+\log\pi_\mu(a)=-\frac{(a-\mu)^2}{2\sigma^2}
+-\log(\sigma\sqrt{2\pi}),\qquad
+\frac{\partial\log\pi_\mu(a)}{\partial\mu}
+=\frac{a-\mu}{\sigma^2}.</script><p>把这条样本的优势估成 +2，使用目标 <code>A × logpi</code> 做一次学习率为 0.05 的梯度上升：</p>
+<script type="math/tex; mode=display">
+g=2\times\frac{0.5-0}{0.5^2}=4,\qquad
+\mu_{\mathrm{new}}=0+0.05\times4=0.2.</script><p><strong>被改成 0.2 的是均值参数 mu；训练记录里的 a 仍为 0.5。</strong> 以后采样时，高斯分布中心向正方向移动，因此附近正动作更容易被采到。若同一条样本的优势是 −2，则梯度为 −4，mu 变成 −0.2，降低对该已采样动作的偏好。</p>
+<section class="rl-demo rl-parameters" data-rl-demo="parameters" aria-label="固定动作样本与策略参数更新演示">
+  <div class="rl-demo-heading"><strong>一次更新，究竟改了谁？</strong><span>固定状态、固定 σ = 0.5</span></div>
+  <div class="rl-demo-controls"><button type="button" data-param-adv="2" aria-pressed="true">优势 A = +2</button><button type="button" data-param-adv="-2" aria-pressed="false">优势 A = −2</button><button type="button" data-param-step>做一次参数更新</button><button type="button" data-reset>重置</button></div>
+  <div class="rl-parameter-values" aria-live="polite">
+    <div><span>已执行动作 a</span><strong data-fixed-action>0.50</strong><span>作为经验记录，保持不变</span></div>
+    <div><span>可学习均值 μ</span><strong data-param-mu>0.00</strong><span>这是本例唯一的策略参数</span></div>
+    <div><span>策略在 a 处的密度</span><strong data-param-density>0.484</strong><span>密度值，不是单点概率</span></div>
+  </div>
+  <p class="rl-explanation" data-param-explanation></p>
+  <code class="rl-demo-code" data-param-equation></code>
+  <noscript><p>优势为 +2 时，梯度为 4，均值从 0 更新为 0.2；优势为 −2 时，均值更新为 −0.2。两种情况下，已执行动作始终为 0.5。</p></noscript>
+</section>
+<p><em>点击更新，观察参数、固定样本和概率密度分别发生什么。这是固定方差、单样本的一次普通策略梯度更新，用来说明参数学习，不是完整 PPO 训练。</em></p>
+<p>真实 actor 的均值一般是 <code>mu = network_theta(obs)</code>，不是一个直接存储的标量。因此反向传播还会通过 mu 计算各层权重的梯度。网络参数共享，一条样本的更新也可能改变其他状态的输出；需要用整批经验平衡这些影响。</p>
+<p>采集与更新分开写，大致如下：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 采集：记录一次已执行的动作，不保存采样过程的梯度图</span></span><br><span class="line"><span class="keyword">with</span> torch.no_grad():</span><br><span class="line">    dist = actor(obs)</span><br><span class="line">    action = dist.sample()</span><br><span class="line"><span class="comment"># 环境执行 action，随后由这批经验计算 advantage</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># 更新：重新计算“当前策略对旧动作的评价”</span></span><br><span class="line">dist = actor(saved_obs)</span><br><span class="line">logp = dist.log_prob(saved_action).<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">loss_actor = -(logp * advantage.detach()).mean()</span><br><span class="line">actor_optimizer.zero_grad()</span><br><span class="line">loss_actor.backward()</span><br><span class="line">actor_optimizer.step()   <span class="comment"># optimizer 管理 actor.parameters()</span></span><br></pre></td></tr></table></figure>
+<p>这里的 saved_action 是常量，但 logp 仍依赖 actor 参数，所以能反向传播。<code>advantage.detach()</code> 则把动作评分当作这一轮的固定数据，避免沿评分误更新 critic。</p>
+<p>如果直接写 <code>loss = -saved_reward</code>，保存的 reward 只是环境已经给出的数值，没有连回 actor 参数的计算图，不能靠它告诉网络该改哪些权重。<code>logp × advantage</code> 在“评分”与“选动作的规则”之间建立了可求导的联系。</p>
+<p>这说的是 PPO 的策略学习方式。轨迹优化可以把整段动作当作优化变量；SAC 更新 actor 时也会保留新采样动作的可导路径，但最终部署策略的优化器仍更新网络参数，后文会说明。</p>
+<h2 id="9-策略梯度为什么能用优势来加权"><a href="#9-策略梯度为什么能用优势来加权" class="headerlink" title="9. 策略梯度为什么能用优势来加权"></a>9. 策略梯度为什么能用优势来加权</h2><p>先固定一个状态，把这一轮评估出的 Q 当作常量，考虑怎样调整动作概率。局部目标为：</p>
+<script type="math/tex; mode=display">
+J_s(\theta)=\sum_a\pi_\theta(a|s)Q^{\mathrm{old}}(s,a).</script><p>在前面的两动作例子中，当前平均回报是 8；若把 a₊ 的概率从 0.5 提高到 0.6，a₋ 降到 0.4，这个局部平均会变为 <code>0.6 × 10 + 0.4 × 6 = 8.4</code>。评价动作，再调整选择概率，就是这一步的目的。</p>
+<p>对动作概率求导，并用“概率的导数 = 概率 × 对数概率的导数”改写：</p>
+<script type="math/tex; mode=display">
+\nabla_\theta J_s=
+\sum_a\pi_\theta(a|s)\nabla_\theta\log\pi_\theta(a|s)Q^{\mathrm{old}}(s,a).</script><p>右侧变成了“按策略采样后求平均”的形式，因此可以用实际采到的动作估计梯度。我们不需要知道每一种动作的真实 Q，只需要能从经验中给动作估计一个评分。</p>
+<p>为什么可以把 Q 换成 Q−V？在固定状态下，V 对所有动作都是同一个基准。减去它带来的梯度项为：</p>
+<script type="math/tex; mode=display">
+V(s)\sum_a\nabla_\theta\pi_\theta(a|s)
+=V(s)\nabla_\theta1=0.</script><p>所以减去一个与当前动作无关、在这次求导中固定的基准，不改变这个期望梯度，却通常能减少采样估计的波动。这是优势进入策略梯度的数学依据；近似的优势估计仍可能引入误差。</p>
+<p>完整策略优化还包含状态访问随策略改变的影响。策略梯度定理处理了这层依赖，得到对数概率梯度乘动作价值／优势的形式；上面的固定状态推导用于先看清这个计算结构，不能把一次局部改进直接当作完整任务性能的保证。<a target="_blank" rel="noopener" href="https://arxiv.org/abs/1502.05477">策略梯度理论补充</a></p>
+<p>把最大化改写成优化器常用的最小化，就得到上一节的负号。Actor 负责改变动作分布，critic 负责估计价值，两者合起来称为 Actor–Critic。它不是 actor 学动作标签、critic 给动作打固定分类分数。</p>
+<h2 id="10-从普通策略梯度到-TRPO：为什么不能一批数据一直改"><a href="#10-从普通策略梯度到-TRPO：为什么不能一批数据一直改" class="headerlink" title="10. 从普通策略梯度到 TRPO：为什么不能一批数据一直改"></a>10. 从普通策略梯度到 TRPO：为什么不能一批数据一直改</h2><p>到这里，普通策略梯度的关键步骤已经齐了：采集经验、估计价值与优势，再更新参数。问题是，评分来自采集时的旧策略；参数更新几次后，当前策略已经变了。</p>
+<p>因此采集时需要保存动作原来的 log probability，更新时再算当前策略对<strong>同一个动作</strong>的 log probability，构造概率比率：</p>
+<script type="math/tex; mode=display">
+\rho_t(\theta)=\frac{\pi_\theta(a_t|s_t)}{\pi_{\mathrm{old}}(a_t|s_t)}
+=\exp(\log\pi_\theta(a_t|s_t)-\log\pi_{\mathrm{old}}(a_t|s_t)).</script><p>例如离散动作原概率 0.5、现概率 0.6，比率为 1.2；连续动作比较的是概率密度。它描述对这条旧动作的偏好变化，不是把动作乘了 1.2。更新过程中，old_logp、旧动作和本轮优势都固定。</p>
+<p>TRPO 的思路是最大化比率加权优势，同时限制新旧动作分布的平均 KL 距离：</p>
+<script type="math/tex; mode=display">
+\max_\theta\ \mathbb E_{\mathrm{old}}[\rho_t(\theta)\hat A_t],\qquad
+\mathbb E_{\mathrm{old}}[D_{\mathrm{KL}}(\pi_{\mathrm{old}}\Vert\pi_\theta)]\le\delta.</script><p>KL 在这里衡量两个动作分布差多少，delta 是允许的变化范围。重点是“允许改善，但别在这一批旧数据上把策略改得太远”。概率比率只修正给定状态下的动作分布，不能完整消除状态访问分布变化的影响。</p>
+<details class="rl-reading-detail" id="rl-extra-trpo"><summary>选读：TRPO 为什么要共轭梯度和线搜索</summary><div><p>在旧参数附近，目标做一阶展开，KL 做二阶展开，得到：</p>
+<script type="math/tex; mode=display">
+\max_{\Delta\theta}g^T\Delta\theta,\qquad
+\frac12\Delta\theta^TF\Delta\theta\le\delta.</script><p>F 是 KL 的局部曲率矩阵，方向与 F 的逆作用于 g 有关。参数很多时，不显式构造逆矩阵，而是用自动微分计算矩阵—向量积，再通过共轭梯度近似求方向：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">old_params = flat_parameters(actor).clone()</span><br><span class="line">g = flat_grad(surrogate, actor)</span><br><span class="line">x = conjugate_gradient(fisher_vector_product, g)</span><br><span class="line">step = x * sqrt(<span class="number">2</span> * max_kl / dot(x, fisher_vector_product(x)))</span><br><span class="line"><span class="keyword">for</span> fraction <span class="keyword">in</span> backtrack_fractions:</span><br><span class="line">    set_parameters(actor, old_params + fraction * step)</span><br><span class="line">    objective, kl = evaluate_on_fixed_batch()</span><br><span class="line">    <span class="keyword">if</span> kl &lt;= max_kl <span class="keyword">and</span> objective &gt; old_objective:</span><br><span class="line">        <span class="keyword">break</span></span><br><span class="line"><span class="keyword">else</span>:</span><br><span class="line">    set_parameters(actor, old_params)</span><br></pre></td></tr></table></figure>
+<p>线搜索重新检查实际 KL 与目标。有限样本、局部近似及平均 KL 约束，都不能直接解释为真实机器人每次更新后必然更好。<a target="_blank" rel="noopener" href="https://arxiv.org/abs/1502.05477">TRPO 原论文</a></p>
+</div></details>
+<h2 id="11-PPO：把“别改太远”写进目标函数"><a href="#11-PPO：把“别改太远”写进目标函数" class="headerlink" title="11. PPO：把“别改太远”写进目标函数"></a>11. PPO：把“别改太远”写进目标函数</h2><p>PPO-Clip 继续使用 old_logp、ratio 和 advantage，将两个候选目标取较小值：</p>
+<script type="math/tex; mode=display">
+L^{\mathrm{clip}}=
+\mathbb E\left[\min\left(\rho\hat A,
+\operatorname{clip}(\rho,1-\epsilon,1+\epsilon)\hat A\right)\right].</script><p>先逐个读符号：rho 是刚才的概率比率；A 是这次动作高于或低于平均水平的估计；clip 把比率临时裁到一段范围；min 让策略采用较保守的那个收益估计。epsilon 常取 0.2，于是比较范围为 <code>[0.8,1.2]</code>。</p>
+<p>正优势 +2 的样本，希望提高动作概率。比率从 1 增到 1.2，目标从 2 增到 2.4；再增到 1.4，未裁剪项虽变成 2.8，PPO 仍取 2.4，停止奖励这条样本在这个方向上的进一步变化。</p>
+<p>负优势 −2 的样本，希望降低动作概率。比率从 1 降到 0.8，目标从 −2 提高到 −1.6；再降到 0.6，PPO 仍取 −1.6。注意“最大化 −1.6 比最大化 −2 更好”，不要因负号把更新方向读反。</p>
+<section class="rl-demo" data-rl-demo="clip" aria-label="PPO 裁剪交互演示">
+  <div class="rl-demo-heading"><strong>PPO 裁剪：一条样本的收益</strong><span>ε = 0.20</span></div>
+  <div class="rl-demo-controls"><button type="button" data-adv="2" aria-pressed="true">好动作 A = +2</button><button type="button" data-adv="-2" aria-pressed="false">坏动作 A = −2</button><button type="button" data-play aria-pressed="false">播放扫描</button><button type="button" data-reset>复位</button></div>
+  <svg viewBox="0 0 640 300" role="img" aria-label="概率比率与 PPO 目标的关系曲线">
+    <rect x="226.67" y="30" width="173.33" height="220" fill="#94a3b8" opacity=".14"/>
+    <path d="M 53 30 V 250 H 580" fill="none" stroke="currentColor" opacity=".4"/>
+    <g fill="currentColor" font-size="14"><text x="15" y="20">目标 L</text><text x="560" y="287">比率 ρ</text><text x="47" y="271">0.4</text><text x="217" y="271">0.8</text><text x="303" y="271">1.0</text><text x="390" y="271">1.2</text><text x="563" y="271">1.6</text><text x="231" y="20">裁剪区间 [0.8, 1.2]</text><text x="12" y="48" data-y-top>3.2</text><text x="12" y="246" data-y-bottom>0.8</text></g>
+    <path data-plain fill="none" stroke="#2563eb" stroke-width="3" stroke-dasharray="7 5"/>
+    <path data-clipped fill="none" stroke="#e87920" stroke-width="4"/>
+    <line data-cursor y1="30" y2="250" stroke="currentColor" opacity=".35" stroke-dasharray="4 4"/>
+    <circle data-point r="7" fill="#e87920" stroke="white" stroke-width="2"/>
+  </svg>
+  <label class="rl-slider">概率比率 ρ <output data-ratio>1.00</output><input aria-label="概率比率" type="range" min="0.4" max="1.6" step="0.01" value="1"></label>
+  <div class="rl-metrics"><div>未裁剪 ρA<strong data-plain-value>2.00</strong></div><div>PPO 目标<strong data-value>2.00</strong></div><div>局部斜率 dL/dρ<strong data-slope>+2</strong></div></div>
+  <p class="rl-explanation" data-explanation></p>
+  <code class="rl-demo-code" data-code></code>
+  <noscript><p>启用 JavaScript 可拖动和播放。正优势在比率超过 1.2 后进入平台，负优势在低于 0.8 后进入平台。</p><img src="/img/control-series/ppo-clip.svg" alt="PPO 正负优势的静态裁剪曲线"></noscript>
+</section>
+<p><em>先看正优势，再切换负优势，拖动概率比率。这里画的是需要最大化的单样本目标；下面代码将其加负号，交给做梯度下降的优化器。</em></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">ratio = (new_logp - old_logp).exp()</span><br><span class="line">plain = ratio * advantage</span><br><span class="line">bounded = ratio.clamp(<span class="number">1</span> - eps, <span class="number">1</span> + eps) * advantage</span><br><span class="line">actor_loss = -torch.minimum(plain, bounded).mean()</span><br></pre></td></tr></table></figure>
+<p>min 还保留了纠错方向：正优势动作如果被错误压到 ratio=0.6，目标仍为 <code>0.6 × 2</code>，会提供提高概率的梯度；负优势动作若被提高到 ratio=1.4，仍会提供降低概率的梯度。只用 <code>clamp(ratio) × advantage</code>，会把这两种纠错梯度也一起裁掉。</p>
+<p>裁剪的是<strong>某条样本的替代目标</strong>，不是电机动作，也不是把参数锁在一个区间。其他样本和共享网络参数仍会改变策略，所以更新后 ratio 也可能越过 <code>[0.8,1.2]</code>。相比 TRPO，PPO 可以用普通一阶优化器做多轮 minibatch 更新。<a target="_blank" rel="noopener" href="https://arxiv.org/abs/1707.06347">PPO 原论文</a></p>
+<h3 id="PPO-和-GAE-分别解决哪一步的问题"><a href="#PPO-和-GAE-分别解决哪一步的问题" class="headerlink" title="PPO 和 GAE 分别解决哪一步的问题"></a>PPO 和 GAE 分别解决哪一步的问题</h3><p>前面的两个问题到这里才接在一起：<strong>GAE 负责估计优势，PPO-Clip 根据这个优势更新策略，同时抑制对同一批旧数据的过度优化。</strong> 前者在处理评分的偏差与方差，后者在处理新旧策略偏离。两者经常一起用，但不能互相替代。</p>
+<p>例如 critic 严重高估后续价值，就可能给一个长期吃亏的动作算出正优势。clip 仍会按这个正优势鼓励提高动作概率，只是在超过阈值后不再增加这条样本的目标收益；它不会自动发现评分算错了。反过来，即使优势估计准确，没有更新约束也可能一次把策略改得过远。</p>
+<h3 id="把一轮训练从头接起来"><a href="#把一轮训练从头接起来" class="headerlink" title="把一轮训练从头接起来"></a>把一轮训练从头接起来</h3><p>下面是省略网络定义的教学代码。先采集并计算固定目标，再更新两个网络；每个样本的标量整理成 <code>[B]</code>，避免意外广播。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 采集时不建立梯度图：保存动作、旧概率、旧价值与状态转移</span></span><br><span class="line">rollout = collect_with_no_grad(actor, critic, env)</span><br><span class="line"><span class="comment"># 本轮固定；截断与终止按第 7 节处理</span></span><br><span class="line">advantages, returns = compute_gae(rollout)</span><br><span class="line">actor_adv = (advantages - advantages.mean()) / (advantages.std() + <span class="number">1e-8</span>)</span><br><span class="line"></span><br><span class="line"><span class="keyword">for</span> epoch <span class="keyword">in</span> <span class="built_in">range</span>(num_epochs):</span><br><span class="line">    <span class="keyword">for</span> batch <span class="keyword">in</span> minibatches(rollout, actor_adv, returns):</span><br><span class="line">        dist = actor(batch.obs)</span><br><span class="line">        new_logp = dist.log_prob(batch.action).<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">        ratio = (new_logp - batch.old_logp).exp()</span><br><span class="line">        clipped = ratio.clamp(<span class="number">0.8</span>, <span class="number">1.2</span>)</span><br><span class="line">        actor_loss = -torch.minimum(ratio * batch.adv,</span><br><span class="line">                                    clipped * batch.adv).mean()</span><br><span class="line">        actor_loss -= entropy_coef * dist.entropy().<span class="built_in">sum</span>(-<span class="number">1</span>).mean()</span><br><span class="line">        actor_optimizer.zero_grad()</span><br><span class="line">        actor_loss.backward()</span><br><span class="line">        actor_optimizer.step()</span><br><span class="line"></span><br><span class="line">        value = critic(batch.critic_obs).squeeze(-<span class="number">1</span>)</span><br><span class="line">        critic_loss = (value - batch.returns).square().mean()</span><br><span class="line">        critic_optimizer.zero_grad()</span><br><span class="line">        critic_loss.backward()</span><br><span class="line">        critic_optimizer.step()</span><br><span class="line"><span class="comment"># 更新结束，重新用新策略采集；这轮旧数据不继续无限复用</span></span><br></pre></td></tr></table></figure>
+<p>actor_loss 改策略参数 theta，让高于平均的选择更受偏好；critic_loss 改价值参数 phi，让预测接近回报目标。熵项鼓励保留一定探索。示例采用两个独立网络；如果共享编码器，还需明确哪些损失共同更新共享参数。</p>
+<p>连续动作的 <code>log_prob(...).sum(-1)</code> 把独立动作维度的对数密度相加，得到整个动作向量的联合对数密度。真实机器人原始 action 再经过动作尺度、默认姿态与 PD 转成执行器命令，这在第 13 节说明。</p>
+<h3 id="PPO-的好处，放到全身控制训练里看"><a href="#PPO-的好处，放到全身控制训练里看" class="headerlink" title="PPO 的好处，放到全身控制训练里看"></a>PPO 的好处，放到全身控制训练里看</h3><p><strong>相对直接反复优化普通策略梯度，PPO 给一批数据的多次利用加了约束。</strong> 普通目标里的 <code>ratio × advantage</code> 可以随着某个正优势动作的概率继续增大；但优势来自旧策略，不能一直当成当前策略的可靠评分。PPO 在有利方向超过阈值后去掉继续提高该样本目标的激励，因此可以在一批经验上做有限轮更新，再换新数据。这是批内复用；它没有把 PPO 变成可以长期回放任意旧经验的 off-policy 算法。</p>
+<p><strong>相对 TRPO，PPO 保留了控制策略变化的意图，更新过程更容易实现。</strong> 上面的 actor loss 直接交给 Adam，不需要求共轭梯度方向和反复线搜索。对全身控制实验，修改观测、网络或加入辅助损失后，仍可沿用这套一阶优化流程。代价是 clip 只作用于替代目标，没有 TRPO 那样显式检查的 KL 约束，更不保证每次真实回报都提高。</p>
+<p><strong>它也适合这里“大量并行仿真、短段采集、整批更新”的组织方式。</strong> actor 一次输出整组关节的连续分布，不需要枚举关节动作组合；critic 帮助从短段经验构造学习目标。训练时给 critic 更多仿真信息、给 actor 部署能获得的观测，也能接入这套流程。不过连续策略、并行仿真和非对称 actor–critic 都不是 PPO 独占的能力，不能把这些工程选择都算成 clip 的贡献。</p>
+<p>这里的适用条件是仿真能持续提供新数据。如果每条经验都要由真机采集，PPO 更新几轮就换新数据的成本会更突出，SAC 一类经验回放方法就值得比较。不能仅凭 PPO 在仿真里常用，就断言它比 SAC 更省样本或部署更安全。</p>
+<h3 id="用一份实际训练配置算一遍"><a href="#用一份实际训练配置算一遍" class="headerlink" title="用一份实际训练配置算一遍"></a>用一份实际训练配置算一遍</h3><p>以 FALCON 分组全身控制实现的一组默认配置为例，下面是配置值及其计算含义，不是运行日志或性能对比结果；具体实验覆盖参数后还要重新核对。</p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>配置</th>
+<th>数值</th>
+<th>在这一轮训练里做什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>并行环境数 × 每环境采样步数</td>
+<td>4096 × 24</td>
+<td>收集 98,304 条新状态转移</td>
+</tr>
+<tr>
+<td>minibatch 数 × 更新轮数</td>
+<td>4 × 5</td>
+<td>每个控制组做 20 次 actor 更新及相应 critic 更新</td>
+</tr>
+<tr>
+<td>gamma / lambda</td>
+<td>0.99 / 0.95</td>
+<td>分别控制奖励折扣与 GAE 的后续 TD error 权重</td>
+</tr>
+<tr>
+<td>clip epsilon</td>
+<td>0.2</td>
+<td>正、负优势对应的有利方向分别在 ratio=1.2、0.8 后进入平台</td>
+</tr>
+<tr>
+<td>初始 actor / critic 学习率</td>
+<td>各 1e−4</td>
+<td>控制参数步长，后续结合 KL 自适应调整</td>
+</tr>
+<tr>
+<td>desired KL</td>
+<td>0.01</td>
+<td>用于学习率调节，不是每次更新必须满足的硬上限</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>采样量和优化量要分开算。</strong> 每个 minibatch 有 24,576 条经验，5 轮让同一批经验各参与 5 次训练，总计 491,520 次样本使用；新采集的数据仍只有 98,304 条。每组的 old_logp 和优势在这些更新中固定。继续增加 epoch，增加的是计算和旧数据使用次数，不能当成获得了更多经验；新旧策略偏离太大时，旧优势也越来越不适合指导当前策略。</p>
+<p>仿真频率为 200 Hz、每 4 个物理步执行一次策略，策略间隔为 0.02 s；24 步对应每个环境 0.48 s 的采样片段，而不是一整段任务。没有终止时，片段尾部通过 critic 的价值预测接上更远的未来，所以短片段也能训练长期任务，前提是 bootstrap 和终止处理正确。</p>
+<p>这组 GAE 参数给出 <code>gamma × lambda = 0.9405</code>。后面第 10 步的 TD error，传到当前优势时乘约 0.541；第 20 步乘约 0.293。它们分别相隔 0.2 s 和 0.4 s：后续修正能传回来，但越远越弱。<strong>这些是 TD error 的权重，不是把 0.4 s 之后的奖励丢掉。</strong> 奖励仍按 gamma 折扣，更远的价值还会通过 bootstrap 进入估计；lambda 也不是机器人的控制频率或固定规划时域。</p>
+<p>clip 之外，这份实现还根据实际高斯分布的平均 KL 调学习率。KL 大于 0.02 时学习率除以 1.5；处于 0 到 0.005 之间时乘以 1.5。它针对的是“这一批参数改得快不快”，与 GAE 针对的“评分是否可靠”分工不同。</p>
+<h3 id="训练不稳时，怎样沿着这条逻辑查"><a href="#训练不稳时，怎样沿着这条逻辑查" class="headerlink" title="训练不稳时，怎样沿着这条逻辑查"></a>训练不稳时，怎样沿着这条逻辑查</h3><p>如果 KL 突然变大，应先检查学习率、每批更新轮数以及动作分布的标准差；clip 不是硬约束，不能因为 epsilon=0.2 就认定策略变化已被锁住。如果还记录了裁剪比例，要先看日志统计的是“ratio 越界”，还是“目标真正进入裁剪平台”，两者不等价。大量样本越界时，继续堆 epoch 未必能学到更多。</p>
+<p>如果 KL 很小，跟踪效果却一直不改善，就不能只缩小更新。要回到评分这一侧，检查 critic 对回报目标的拟合、优势的分布、摔倒与超时的处理，以及各项奖励是否把好行为评成了高分。价值损失下降只说明更接近当前目标；目标算错，它也可以下降。本文后面的奖励表就是为了把这个评分来源拆开看。</p>
+<p>如果仿真回报很好、机器人仍然抖动或接触失败，则要继续检查动作尺度、PD、力矩饱和与碰撞模型。PPO 能优化给定仿真和奖励中的策略，不能替代执行器建模，也不会由 clip 自动产生柔顺性。需要比较算法时，应在相同任务、奖励和评估条件下分别记录采样量、耗时、跟踪误差和失败率；这里的配置计算本身不能证明哪个算法效果更好。</p>
+<details class="rl-reading-detail" id="rl-extra-implementation"><summary>选读：FALCON 实现中的分组 PPO、KL 和超时处理</summary><div><p>FALCON 分组控制实现对各控制组分别维护 actor、critic 与优化器，每组内先对动作维度求联合 log probability；没有把每个关节当成独立 PPO 样本。它先给 ratio×advantage 取负号，再取 maximum，与上文取 minimum 后加负号等价。</p>
+<p>更新时用新旧高斯均值和标准差计算解析 KL。学习率按上文阈值调整，并限制在 1e−5 到 1e−2。这个机制调整后续更新速度，不撤回刚才的参数。</p>
+<p>实现将超时补偿先加进 reward，再用 done 截断 GAE；严格的最终状态 bootstrap 要使用截断前的下一状态价值，而不是自动 reset 后的价值。应核对补偿读取 value 的具体时刻。</p>
+<p>每个控制组独立计算自己的优势与联合概率比率。上文的 20 次更新是每组的更新次数，不表示把每个关节分别更新 20 次，也不表示执行了 20 次物理控制。</p>
+</div></details>
+<h3 id="面试问“为什么选-PPO”，可以怎样回答"><a href="#面试问“为什么选-PPO”，可以怎样回答" class="headerlink" title="面试问“为什么选 PPO”，可以怎样回答"></a>面试问“为什么选 PPO”，可以怎样回答</h3><blockquote>
+<p>对这里的全身控制仿真，首先需要用经验判断动作的长期好坏：critic 估计 V，TD error 提供一步修正，GAE 把不同步数的修正组合起来，在价值估计偏差与轨迹噪声之间折中。然后才是更新策略：PPO 用新旧动作概率比率乘优势，并通过 clip 抑制一批旧数据上的过度优化，因此能够对同一批经验做有限轮 minibatch 更新。相比 TRPO，它可以直接使用一阶优化器，实现和修改都更方便。</p>
+<p>具体到这组配置，4096 个环境各采 24 步，每批 98,304 条经验，分 4 个 minibatch 训练 5 轮；gamma=0.99、lambda=0.95、epsilon=0.2，并用 KL 调整学习率。这与并行仿真不断提供新数据的方式相配合。但 GAE 不是 PPO 独有的，clip 也不保证回报单调上升；真机数据昂贵时还要比较 SAC 的回放收益，动作尺度和接触模型仍需单独验证。</p>
+</blockquote>
+<p>PPO 的批内复用仍受新旧策略差异限制。接下来换一个问题：如果希望更长期地保留经验，怎样在旧状态上评价当前策略新产生的动作？这就引出了 SAC 的 Q 网络和经验回放。</p>
+<h2 id="12-SAC-是什么：让旧经验留下来，学习动作价值-Q"><a href="#12-SAC-是什么：让旧经验留下来，学习动作价值-Q" class="headerlink" title="12. SAC 是什么：让旧经验留下来，学习动作价值 Q"></a>12. SAC 是什么：让旧经验留下来，学习动作价值 Q</h2><p>PPO 的 critic 主要估计状态价值 V，帮助构造优势；更新 actor 时评价的是本轮执行过的动作。SAC 则学习动作价值 Q(s,a)，把状态转移长期保存在经验回放 replay 中，并反复抽样更新。</p>
+<p>actor 在 replay 抽出的状态上重新产生一个动作，交给可求导的 Q 网络评价，再根据这个评价更新自身参数。这里的新动作可以处在梯度路径上，但优化器更新的仍是 actor 参数；replay 中机器人过去真正执行的动作不会被改写。</p>
+<p>SAC 还把熵纳入目标，控制追求高回报与保留探索之间的权衡。它不需要 PPO 的 old_logp 比率，但增加了 Q 估计、目标网络、回放分布与温度之间的耦合。先理解到这一步，再看下面的完整方程即可。</p>
+<section class="rl-demo" data-rl-demo="buffer" aria-label="PPO 与 SAC 数据生命周期演示">
+  <div class="rl-demo-heading"><strong>同一条数据，什么时候还会用到？</strong><span data-step-label></span></div>
+  <div class="rl-demo-controls"><button type="button" data-mode="ppo" aria-pressed="true">PPO rollout</button><button type="button" data-mode="sac" aria-pressed="false">SAC replay</button><button type="button" data-next>下一步</button><button type="button" data-play aria-pressed="false">播放流程</button><button type="button" data-reset>重来</button></div>
+  <ol class="rl-phases" aria-label="数据处理阶段"><li>采集</li><li>存储</li><li>更新</li><li>下一批</li></ol>
+  <div class="rl-buffer-box"><span data-buffer-label></span><div class="rl-tokens" data-tokens></div></div>
+  <p class="rl-explanation" data-explanation></p>
+  <code class="rl-demo-code" data-code></code>
+  <p class="rl-demo-note">教学流程：卡片数量、更新轮数和采样组合仅用于说明数据生命周期。</p>
+  <noscript><p>PPO 在一轮更新内固定旧概率，更新完成后重新采集；SAC 保留历史 transition，并从 replay 随机采样。</p><img src="/img/control-series/rl-dataflow.svg" alt="PPO 与 SAC 的数据流"></noscript>
+</section>
+<p><em>用“下一步”对比数据的去向：PPO 一轮更新结束后换新数据，SAC 在 replay 中保留新旧经验。</em></p>
+<details class="rl-reading-detail" id="rl-extra-sac"><summary>选读：SAC 的目标函数、可导采样与 FastSAC 实现</summary><div><p>SAC 将熵写入控制目标。对连续策略，熵由动作概率密度的负对数估计：</p>
+<script type="math/tex; mode=display">
+J_{\mathrm{SAC}}=\mathbb E\sum_t\gamma^t
+\left[r_t-\alpha\log\pi_\theta(a_t|s_t)\right].</script><p>它在回报和探索之间做权衡。<script type="math/tex">\alpha</script> 是熵温度，奖励尺度变化时也要重新检查其相对作用。使用双 Q 与目标网络的常见实现，以如下目标更新 critic：</p>
+<script type="math/tex; mode=display">
+y=r+\gamma(1-d)\left[
+\min_{i=1,2}\bar Q_i(s',a')-\alpha\log\pi_\theta(a'|s')\right],
+\qquad a'\sim\pi_\theta(\cdot|s'),</script><script type="math/tex; mode=display">
+L_Q=\mathbb E_{\mathcal D}\sum_{i=1}^2(Q_i(s,a)-y)^2,\qquad
+L_\pi=\mathbb E_{s\sim\mathcal D,\epsilon}
+\left[\alpha\log\pi_\theta(a_\theta|s)-\min_iQ_i(s,a_\theta)\right].</script><p>其中，<script type="math/tex">\mathcal D</script> 是经验回放分布，<script type="math/tex">d</script> 表示真实终止，横线 Q 是目标网络；actor 的动作通过重参数化 <script type="math/tex">a_\theta=f_\theta(s,\epsilon)</script> 生成。Q 的目标 y 停止梯度，actor 更新则保留 Q 对动作的梯度。对应下面的 <code>no_grad</code>、<code>rsample_and_log_prob</code> 和冻结 Q 参数三处代码。<a target="_blank" rel="noopener" href="https://spinningup.openai.com/en/latest/algorithms/sac.html#key-equations">SAC 的目标与更新方程</a></p>
+<p><strong>先看常见的标量双 Q 版本</strong></p>
+<p>下面每个 batch 的标量都是 <code>[B]</code>；<code>alpha</code> 是熵温度，<code>polyak_update</code> 将目标 Q 缓慢移向当前 Q。截断时保留最终 <code>next_obs</code>，只有真实任务终止才关闭 bootstrap。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line">batch = replay.sample(batch_size)</span><br><span class="line"><span class="keyword">with</span> torch.no_grad():</span><br><span class="line">    next_action, next_logp = actor.rsample_and_log_prob(batch.next_obs)</span><br><span class="line">    next_q = torch.minimum(q1_target(batch.next_obs, next_action),</span><br><span class="line">                           q2_target(batch.next_obs, next_action))</span><br><span class="line">    target = batch.reward + gamma * (<span class="number">1</span> - batch.terminated.<span class="built_in">float</span>()) * (</span><br><span class="line">        next_q - alpha.detach() * next_logp)</span><br><span class="line"></span><br><span class="line">q_loss = ((q1(batch.obs, batch.action) - target).square()</span><br><span class="line">        + (q2(batch.obs, batch.action) - target).square()).mean()</span><br><span class="line">q_optimizer.zero_grad()</span><br><span class="line">q_loss.backward()</span><br><span class="line">q_optimizer.step()</span><br><span class="line"></span><br><span class="line"><span class="comment"># 冻结 Q 参数，但保留 Q 对 action 的梯度；不要用 torch.no_grad()</span></span><br><span class="line">set_requires_grad([q1, q2], <span class="literal">False</span>)</span><br><span class="line">action, logp = actor.rsample_and_log_prob(batch.obs)</span><br><span class="line">q = torch.minimum(q1(batch.obs, action), q2(batch.obs, action))</span><br><span class="line">actor_loss = (alpha.detach() * logp - q).mean()</span><br><span class="line">actor_optimizer.zero_grad()</span><br><span class="line">actor_loss.backward()</span><br><span class="line">actor_optimizer.step()</span><br><span class="line">set_requires_grad([q1, q2], <span class="literal">True</span>)</span><br><span class="line">polyak_update([q1, q2], [q1_target, q2_target])</span><br></pre></td></tr></table></figure>
+<p>Q 更新使用 replay 中真的执行过的动作；actor 更新使用当前策略新采样的动作，经 Q 对动作的梯度反传。这就是这里不需要 <code>old_logp</code> 和 PPO ratio 的原因。</p>
+<p>目标中的 <code>−alpha * logp</code> 奖励策略保留熵。双 Q 取较小值以减轻过估计，目标网络降低 bootstrap 目标随优化剧烈变化的问题。这里采用后续常用的双目标 Q 形式；SAC 初版还有独立的 soft value 网络。<a target="_blank" rel="noopener" href="https://arxiv.org/abs/1801.01290">SAC 原论文</a>、<a target="_blank" rel="noopener" href="https://arxiv.org/abs/1812.05905">后续算法与自动温度</a></p>
+<p><strong>Tanh 动作为什么还要修改 log probability</strong></p>
+<p>连续控制常先采高斯 <script type="math/tex">u=\mu+\sigma\epsilon</script>，再输出 <script type="math/tex">a=b+S\tanh u</script>。概率密度必须包含变换的 Jacobian：</p>
+<script type="math/tex; mode=display">
+\log\pi(a|s)=\sum_j\left[\log\mathcal N(u_j;\mu_j,\sigma_j^2)
+-\log(1-\tanh^2u_j)-\log|S_j|\right].</script><p>Holosoma 的 FastSAC actor 对 tanh 和动作缩放都做了修正。漏掉 tanh 项会改变 actor 梯度；固定缩放项对 actor 参数是常数，但会改变熵的数值，进而影响自动温度更新。</p>
+<p><strong>FastSAC 对这段基础代码又改了什么</strong></p>
+<p>Holosoma FastSAC 使用分布型 critic：每个 Q 输出离散支持点上的概率，target 要先投影回这些支持点，再计算交叉熵。因此上面的 Q 均方误差只是基础 SAC 的教学写法，不能拿去替代它的 critic loss。actor 用分布的期望 Q，温度通过 <code>log_alpha</code> 学习。<a target="_blank" rel="noopener" href="https://github.com/amazon-far/holosoma/tree/main/src/holosoma/holosoma/agents/fast_sac">FastSAC 实现</a></p>
+<p>看训练日志时也就多了一项：目标回报有没有大量堆在价值分布的两端。若奖励量级超过支持范围，先调整奖励尺度或支持范围；只增加网络层数无法消除截断。</p>
+</div></details>
+<h2 id="13-接到机器人上：动作尺度和采样时间仍要对齐"><a href="#13-接到机器人上：动作尺度和采样时间仍要对齐" class="headerlink" title="13. 接到机器人上：动作尺度和采样时间仍要对齐"></a>13. 接到机器人上：动作尺度和采样时间仍要对齐</h2><p>算法里的 <code>action</code> 最后通常经过位置目标和 PD：</p>
+<script type="math/tex; mode=display">
+q^{\mathrm{des}}=q_0+Sa,\qquad
+\tau=\operatorname{clip}\left(K_p(q^{\mathrm{des}}-q)-K_d\dot q,-\tau_{\max},\tau_{\max}\right).</script><p>未饱和时，动作到力矩的局部增益是 <script type="math/tex">K_pS</script>。例如上肢 <code>Kp=60</code>，<code>S=0.5</code> 时动作变动 0.1 对应 3 N·m；改成 <code>S=0.7</code> 就对应 4.2 N·m。策略的标准差相同，物理探索幅度也已经不同。</p>
+<p>时间尺度同样影响训练。50 Hz 控制下采 24 步，覆盖 0.48 s，之后的回报由 critic bootstrap。若改成 100 Hz 却保持折扣 <code>gamma</code> 不变，以秒计的折扣视野会缩短；固定连续时间折扣率 <script type="math/tex">\beta</script> 时应按 <script type="math/tex">\gamma=e^{-\beta\Delta t}</script> 换算。</p>
+<p>PPO 适合高吞吐并行仿真中反复采新数据；SAC 的 replay 可以降低对新数据的需求，但增加了 Q 估计、目标网络和数据分布的耦合。动作跟踪任务还要把参考动作或相位放进条件，否则 replay 中同样的机器人姿态可能对应不同目标。</p>
+<p>比较两者时，至少同时记录环境交互步数、优化步数和耗时。KL/clip fraction 用来看 PPO 更新，Q 值与温度用来看 SAC；跟踪误差、跌倒率、关节力矩饱和率则用来看机器人实际完成了什么。</p>
+<h2 id="14-任务奖励：基础预设和-FastSAC-预设差在哪里"><a href="#14-任务奖励：基础预设和-FastSAC-预设差在哪里" class="headerlink" title="14. 任务奖励：基础预设和 FastSAC 预设差在哪里"></a>14. 任务奖励：基础预设和 FastSAC 预设差在哪里</h2><p>PPO 和 SAC 都不规定机器人必须使用哪套任务奖励。下面以 Holosoma 的全身跟踪任务为例，对照基础奖励预设与 FastSAC 预设。两套预设有三项权重不同。</p>
+<p>RewardManager 使用 <code>sum(weight * raw_reward * dt)</code>。FastSAC 预设同时改变了 anchor 位置、身体位置和 action rate 三项，因此两条训练曲线的差异不能全部归因于算法。要比较算法效率，应固定任务奖励，或明确同时调参的实验设置。</p>
+<p>点击名称可跳到对应的公式与实现说明，并自动展开。</p>
+<div class="table-container">
+<div class="reward-table-wrap" tabindex="0" role="region" aria-label="奖励与代价参数表，可横向滚动"><table class="reward-table">
+<thead>
+<tr>
+<th>名称</th>
+<th>基础预设</th>
+<th>FastSAC 预设</th>
+<th>尺度／定义</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#reward-rl-0"><code>motion_global_ref_position_error_exp</code></a></td>
+<td>0.5</td>
+<td>1</td>
+<td>std = 0.3 m</td>
+<td>限制 anchor 全局漂移</td>
+</tr>
+<tr>
+<td><a href="#reward-rl-1"><code>motion_global_ref_orientation_error_exp</code></a></td>
+<td>0.5</td>
+<td>0.5</td>
+<td>std = 0.4 rad</td>
+<td>跟住 anchor 朝向</td>
+</tr>
+<tr>
+<td><a href="#reward-rl-2"><code>motion_relative_body_position_error_exp</code></a></td>
+<td>1</td>
+<td>2</td>
+<td>std = 0.3 m</td>
+<td>保留身体相对几何</td>
+</tr>
+<tr>
+<td><a href="#reward-rl-3"><code>motion_relative_body_orientation_error_exp</code></a></td>
+<td>1</td>
+<td>1</td>
+<td>std = 0.4 rad</td>
+<td>保留各身体姿态</td>
+</tr>
+<tr>
+<td><a href="#reward-rl-4"><code>motion_global_body_lin_vel</code></a></td>
+<td>1</td>
+<td>1</td>
+<td>std = 1 m/s</td>
+<td>匹配平移速度</td>
+</tr>
+<tr>
+<td><a href="#reward-rl-5"><code>motion_global_body_ang_vel</code></a></td>
+<td>1</td>
+<td>1</td>
+<td>std = 3.14 rad/s</td>
+<td>匹配转动速度</td>
+</tr>
+<tr>
+<td><a href="#reward-rl-6"><code>action_rate_l2</code></a></td>
+<td>−0.1</td>
+<td>−1</td>
+<td>原始动作平方和</td>
+<td>抑制动作抖动</td>
+</tr>
+<tr>
+<td><a href="#reward-rl-7"><code>limits_dof_pos</code></a></td>
+<td>−10</td>
+<td>−10</td>
+<td>软限位越界量，rad</td>
+<td>远离关节限位</td>
+</tr>
+<tr>
+<td><a href="#reward-rl-8"><code>undesired_contacts</code></a></td>
+<td>−0.1</td>
+<td>−0.1</td>
+<td>阈值 1 N</td>
+<td>减少不允许的身体碰撞</td>
+</tr>
+</tbody>
+</table></div>
+</div>
+<h3 id="逐项实现"><a href="#逐项实现" class="headerlink" title="逐项实现"></a>逐项实现</h3><details class="reward-detail" id="reward-rl-0"><summary>motion_global_ref_position_error_exp</summary><div class="reward-detail-body"><p><code>motion_global_ref_position_error_exp</code> 对 anchor 三轴位置差取平方和，再做指数核。权重 0.5 控制该项的贡献，0.3 m 控制容忍尺度。误差 0.3 m 时原始值约 0.3679；它不能保证机器人永不漂移。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">err2 = (p_anchor_ref - p_anchor).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">r = torch.exp(-err2 / <span class="number">0.3</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-rl-1"><summary>motion_global_ref_orientation_error_exp</summary><div class="reward-detail-body"><p><code>motion_global_ref_orientation_error_exp</code> 使用四元数的最短旋转角误差，先平方，再除以 0.4²。不要将四个四元数分量直接相减：q 和 −q 表示同一旋转。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">angle = quat_error_magnitude(q_ref, q_actual)</span><br><span class="line">r = torch.exp(-angle.square() / <span class="number">0.4</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-rl-2"><summary>motion_relative_body_position_error_exp</summary><div class="reward-detail-body"><p><code>motion_relative_body_position_error_exp</code> 比较经过 anchor/yaw 对齐的参考身体位置与实际位置：先对 xyz 求平方和，再对身体取均值，最后求一次 exp。它不是逐身体 exp 后求平均。身体列表改变后，每个部位在均值中的占比也会改变。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">err2 = (p_body_aligned - p_body).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">r = torch.exp(-err2.mean(-<span class="number">1</span>) / <span class="number">0.3</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-rl-3"><summary>motion_relative_body_orientation_error_exp</summary><div class="reward-detail-body"><p><code>motion_relative_body_orientation_error_exp</code> 对每个身体计算最短旋转角，平方后在身体维度平均，再用 0.4 rad 核。相对目标的构造与位置项共享参考约定，不能把局部和世界四元数混用。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">angle = quat_error_magnitude(q_body_aligned, q_body)</span><br><span class="line">r = torch.exp(-angle.square().mean(-<span class="number">1</span>) / <span class="number">0.4</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-rl-4"><summary>motion_global_body_lin_vel</summary><div class="reward-detail-body"><p><code>motion_global_body_lin_vel</code> 比较世界系身体线速度，三轴平方和后对身体平均；1 m/s 是误差尺度。位置很接近但身体仍在快速冲过目标时，这项会降低奖励。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">err2 = (v_ref_w - v_w).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">r = torch.exp(-err2.mean(-<span class="number">1</span>) / <span class="number">1.0</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-rl-5"><summary>motion_global_body_ang_vel</summary><div class="reward-detail-body"><p><code>motion_global_body_ang_vel</code> 比较世界系身体角速度。3.14 rad/s 是指数核尺度，不是机器人最大允许角速度。它补充姿态项，但不能替代力矩限制。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">err2 = (omega_ref_w - omega_w).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">r = torch.exp(-err2.mean(-<span class="number">1</span>) / <span class="number">3.14</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-rl-6"><summary>action_rate_l2</summary><div class="reward-detail-body"><p>Holosoma 的 <code>action_rate_l2</code> 返回连续两次动作之差的平方和，配置乘负权重。它没有除以控制周期，因此不是物理意义上的关节加速度。动作幅度和控制频率变化后，同一系数的效果也会变。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">cost = (action - previous_action).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-rl-7"><summary>limits_dof_pos</summary><div class="reward-detail-body"><p>Holosoma 的 <code>limits_dof_pos</code> 对上下软限位之外的距离取正部，按关节相加。原始量非负、权重为负，且这里不是平方惩罚。它是奖励代价，不能替代执行器硬限位。 本预设以关节硬范围中点为中心，将半宽乘 0.9 得到软限位；参数来自该奖励自己的 <code>soft_dof_pos_limit</code>。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">cost = ((lower_soft - q).clamp_min(<span class="number">0</span>)</span><br><span class="line">        + (q - upper_soft).clamp_min(<span class="number">0</span>)).<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-rl-8"><summary>undesired_contacts</summary><div class="reward-detail-body"><p>Holosoma 的 <code>UndesiredContacts</code> 先在接触历史窗取每个身体的力范数峰值，超过 1 N 的身体记为 1，再求和。脚和允许接触的部位必须从筛选集合排除；阈值判断意味着超过 1 N 与超过 100 N 对同一个身体贡献一样。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">peak = contact_forces_history.norm(dim=-<span class="number">1</span>).amax(dim=<span class="number">1</span>)</span><br><span class="line">cost = (peak[:, forbidden_body_ids] &gt; <span class="number">1.0</span>).<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<h3 id="环境奖励和优化器损失分两层看"><a href="#环境奖励和优化器损失分两层看" class="headerlink" title="环境奖励和优化器损失分两层看"></a>环境奖励和优化器损失分两层看</h3><p>FALCON 的分组全身控制 PPO 中，clip 参数是 0.2、value loss coefficient 为 1.0、entropy coefficient 为 0.01；它们进入参数更新目标，不应塞进环境奖励表当作每步机器人奖励。TRPO 的 KL 阈值、SAC 的温度同样属于优化规则。SAC 若自动学习温度，不能拿初始温度当成训练全程不变的常数。</p>
+<p>相对原生算法，当前讨论的工程差异包括分组 critic／动作接口、回报处理和任务预设。它们不改变“PPO 使用同批 rollout 的概率比率，SAC 从 replay 中学习双 Q”这两个核心机制。机器人型号、action scale 和控制周期改变后，奖励分布也会改变，直接复用一组损失系数不保证同样稳定。</p>
+<h2 id="阅读与实现依据"><a href="#阅读与实现依据" class="headerlink" title="阅读与实现依据"></a>阅读与实现依据</h2><ul>
+<li><p>赵世钰：<a target="_blank" rel="noopener" href="https://github.com/MathFoundationRL/Book-Mathematical-Foundation-of-Reinforcement-Learning">《强化学习的数学原理》官方教材与课程</a>。本文参考概念递进顺序，例子与说明独立编写。</p>
+</li>
+<li><p><a target="_blank" rel="noopener" href="https://spinningup.openai.com/en/latest/algorithms/vpg.html">策略梯度</a>、<a target="_blank" rel="noopener" href="https://arxiv.org/abs/1502.05477">TRPO</a>、<a target="_blank" rel="noopener" href="https://arxiv.org/abs/1707.06347">PPO</a>、<a target="_blank" rel="noopener" href="https://arxiv.org/abs/1506.02438">GAE</a>。</p>
+</li>
+<li><a target="_blank" rel="noopener" href="https://arxiv.org/abs/1801.01290">SAC 初版</a>、<a target="_blank" rel="noopener" href="https://arxiv.org/abs/1812.05905">SAC 后续形式</a>。</li>
+<li><a target="_blank" rel="noopener" href="https://github.com/LeCAR-Lab/FALCON">FALCON</a>、<a target="_blank" rel="noopener" href="https://github.com/amazon-far/holosoma">Holosoma</a>：本文的工程对照。具体奖励预设和控制组设置是实现选择，不是算法本身的统一参数。</li>
+</ul>
+<link rel="stylesheet" href="/css/rl-demos.css"><script src="/js/rl-demos.js" defer></script><link rel="stylesheet" href="/css/control-series.css"><script src="/js/control-series.js" defer></script></article><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta"><i class="fas fa-circle-user fa-fw"></i>文章作者: </span><span class="post-copyright-info"><a href="https://cherishxi.xyz">Xi Zeng</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta"><i class="fas fa-square-arrow-up-right fa-fw"></i>文章链接: </span><span class="post-copyright-info"><a href="https://cherishxi.xyz/2026/05/29/trpo-ppo-sac-robot-control/">https://cherishxi.xyz/2026/05/29/trpo-ppo-sac-robot-control/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta"><i class="fas fa-circle-exclamation fa-fw"></i>版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来源 <a href="https://cherishxi.xyz" target="_blank">Xi Zeng's Blog</a>！</span></div></div><div class="tag_share"><div class="post-meta__tag-list"><a class="post-meta__tags" href="/tags/%E5%BC%BA%E5%8C%96%E5%AD%A6%E4%B9%A0/">强化学习</a><a class="post-meta__tags" href="/tags/TRPO/">TRPO</a><a class="post-meta__tags" href="/tags/PPO/">PPO</a><a class="post-meta__tags" href="/tags/SAC/">SAC</a><a class="post-meta__tags" href="/tags/%E6%9C%BA%E5%99%A8%E4%BA%BA%E6%8E%A7%E5%88%B6/">机器人控制</a></div><div class="post-share"><div class="social-share" data-image="/img/photo.JPG" data-sites="facebook,x,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/css/share.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/js/social-share.min.js" defer></script></div></div><nav class="pagination-post" id="pagination"><a class="pagination-related" href="/2026/06/17/beyondmimic-control-foundations/" title="BeyondMimic 全身动作跟踪原理与机器人适配"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info"><div class="info-1"><div class="info-item-1">上一篇</div><div class="info-item-2">BeyondMimic 全身动作跟踪原理与机器人适配</div></div><div class="info-2"><div class="info-item-1">拆解 BeyondMimic 的参考、观测、跟踪奖励与采样机制，以逐际动力平台为例计算 armature、PD 增益和动作尺度，并对照不同执行器接口、碰撞几何与接触惩罚的实际差异。</div></div></div></a><a class="pagination-related" href="/2026/04/08/sim-to-real/" title="双足机器人强化学习 Sim-to-Real 方法及细节实现"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-right"><div class="info-1"><div class="info-item-1">下一篇</div><div class="info-item-2">双足机器人强化学习 Sim-to-Real 方法及细节实现</div></div><div class="info-2"><div class="info-item-1">从奖励设计、域随机化策略到真实部署，完整复盘双足机器人强化学习 Sim-to-Real 训练全流程。</div></div></div></a></nav><div class="relatedPosts"><div class="headline"><i class="fas fa-thumbs-up fa-fw"></i><span>相关推荐</span></div><div class="relatedPosts-list"><a class="pagination-related" href="/2026/03/09/kalman/" title="卡尔曼滤波：动态系统中的最优状态估计"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-03-09</div><div class="info-item-2">卡尔曼滤波：动态系统中的最优状态估计</div></div><div class="info-2"><div class="info-item-1">从双足机器人姿态估计出发，推导标量与向量卡尔曼滤波器，理解预测-更新循环与卡尔曼增益的直觉。</div></div></div></a><a class="pagination-related" href="/2026/04/08/sim-to-real/" title="双足机器人强化学习 Sim-to-Real 方法及细节实现"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-04-08</div><div class="info-item-2">双足机器人强化学习 Sim-to-Real 方法及细节实现</div></div><div class="info-2"><div class="info-item-1">从奖励设计、域随机化策略到真实部署，完整复盘双足机器人强化学习 Sim-to-Real 训练全流程。</div></div></div></a><a class="pagination-related" href="/2026/03/18/gmr/" title="基于 GMR 框架的动捕数据重定向工作"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-03-18</div><div class="info-item-2">基于 GMR 框架的动捕数据重定向工作</div></div><div class="info-2"><div class="info-item-1">将动捕设备采集得到的人体动作数据重定向到机器人的目标骨架与关节空间中，从而完成从人体动作表示到机器人动作表示的映射与验证。纯小白跟着做也可以完成呀！</div></div></div></a><a class="pagination-related" href="/2026/04/01/act-network/" title="双足机器人执行器网络（Actuator Network）真机数据采集与建模"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-04-01</div><div class="info-item-2">双足机器人执行器网络（Actuator Network）真机数据采集与建模</div></div><div class="info-2"><div class="info-item-1">介绍一套面向双足人形机器人的执行器网络真机系统辨识与数据采集流程，通过神经网络替代理想化执行器模型，缩小 Sim-to-Real Gap。</div></div></div></a><a class="pagination-related" href="/2026/07/24/retargeting-gmr-pyroki-omni/" title="人体动作重定向原理与实现：GMR、PyRoKi 与 OmniRetarget"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-07-24</div><div class="info-item-2">人体动作重定向原理与实现：GMR、PyRoKi 与 OmniRetarget</div></div><div class="info-2"><div class="info-item-1">从 FK、Jacobian 和残差线性化出发，推导速度级 IK、Gauss–Newton、LM 与约束优化，对照 GMR、PyRoKi 轨迹建模和 OmniRetarget 的交互保持机制，解释代价权重、时间尺度与几何可行性的边界。</div></div></div></a></div></div></div><div class="aside-content" id="aside-content"><div class="card-widget card-info text-center"><div class="avatar-img"><img src="/img/photo.JPG" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="author-info-name">Xi Zeng</div><div class="author-info-description"></div><div class="site-data"><a href="/archives/"><div class="headline">文章</div><div class="length-num">14</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">32</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">14</div></a></div><a id="card-info-btn" target="_blank" rel="noopener" href="https://github.com/Cherishings"><i class="fab fa-github"></i><span>Follow Me</span></a><div class="card-info-social-icons"><a class="social-icon" href="https://github.com/Cherishings" target="_blank" title="Github"><i class="fab fa-github" style="color: #24292e;"></i></a><a class="social-icon" href="mailto:504132714@qq.com" target="_blank" title="Email"><i class="fas fa-envelope" style="color: #4a7dbe;"></i></a></div></div><div class="card-widget card-announcement"><div class="item-headline"><i class="fas fa-bullhorn fa-shake"></i><span>公告</span></div><div class="announcement_content">纸质与电子档笔记持续整理中，更多分享即将出炉</div></div><div class="sticky_layout"><div class="card-widget" id="card-toc"><div class="item-headline"><i class="fas fa-stream"></i><span>目录</span><span class="toc-percentage"></span></div><div class="toc-content"><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#1-%E7%8A%B6%E6%80%81%E3%80%81%E5%8A%A8%E4%BD%9C%E3%80%81%E7%AD%96%E7%95%A5%E4%B8%8E%E5%8F%82%E6%95%B0%EF%BC%8C%E5%90%84%E6%98%AF%E4%BB%80%E4%B9%88"><span class="toc-text">1. 状态、动作、策略与参数，各是什么</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#2-Reward-%E6%98%AF%E4%B8%80%E6%AD%A5%E8%AF%84%E5%88%86%EF%BC%8CReturn-%E6%98%AF%E5%BE%80%E5%90%8E%E7%B4%AF%E8%AE%A1%E7%9A%84%E8%AF%84%E5%88%86"><span class="toc-text">2. Reward 是一步评分，Return 是往后累计的评分</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#3-V-%E5%92%8C-Q-%E4%B8%BA%E4%BB%80%E4%B9%88%E8%A6%81%E5%88%86%E6%88%90%E4%B8%A4%E4%B8%AA%E5%87%BD%E6%95%B0"><span class="toc-text">3. V 和 Q 为什么要分成两个函数</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#V%EF%BC%9A%E5%A4%84%E5%9C%A8%E8%BF%99%E4%B8%AA%E7%8A%B6%E6%80%81%EF%BC%8C%E6%8C%89%E5%BD%93%E5%89%8D%E7%AD%96%E7%95%A5%E7%BB%A7%E7%BB%AD%EF%BC%8C%E5%B9%B3%E5%9D%87%E8%83%BD%E6%8B%BF%E5%A4%9A%E5%B0%91"><span class="toc-text">V：处在这个状态，按当前策略继续，平均能拿多少</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Q%EF%BC%9A%E8%BF%99%E4%B8%AA%E7%8A%B6%E6%80%81%E4%B8%8B%E5%85%88%E6%8C%87%E5%AE%9A%E4%B8%80%E4%B8%AA%E5%8A%A8%E4%BD%9C%EF%BC%8C%E5%86%8D%E6%8C%89%E5%BD%93%E5%89%8D%E7%AD%96%E7%95%A5%E7%BB%A7%E7%BB%AD%EF%BC%8C%E5%B9%B3%E5%9D%87%E8%83%BD%E6%8B%BF%E5%A4%9A%E5%B0%91"><span class="toc-text">Q：这个状态下先指定一个动作，再按当前策略继续，平均能拿多少</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#4-Bellman-%E6%96%B9%E7%A8%8B%E6%80%8E%E6%A0%B7%E4%BB%8E%E5%9B%9E%E6%8A%A5%E6%8E%A8%E5%87%BA%E6%9D%A5"><span class="toc-text">4. Bellman 方程怎样从回报推出来</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#5-%E4%B8%8D%E7%9F%A5%E9%81%93%E7%9C%9F%E5%AE%9E-V%EF%BC%8Ccritic-%E6%80%8E%E4%B9%88%E5%AD%A6%EF%BC%9A%E4%BB%8E-MC-%E5%88%B0-TD-error"><span class="toc-text">5. 不知道真实 V，critic 怎么学：从 MC 到 TD error</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%AD%89%E5%9B%9E%E5%90%88%E7%BB%93%E6%9D%9F%E5%86%8D%E8%AF%84%E5%88%86%EF%BC%9AMonte-Carlo"><span class="toc-text">等回合结束再评分：Monte Carlo</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%8F%AA%E7%AD%89%E4%B8%80%E6%AD%A5%EF%BC%9ATemporal-Difference"><span class="toc-text">只等一步：Temporal Difference</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#6-%E4%BC%98%E5%8A%BF%E5%87%BD%E6%95%B0-A-%E4%BB%8E%E5%93%AA%E9%87%8C%E6%9D%A5"><span class="toc-text">6. 优势函数 A 从哪里来</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%B8%BA%E4%BB%80%E4%B9%88-TD-error-%E8%83%BD%E6%8B%BF%E6%9D%A5%E4%BC%B0%E8%AE%A1%E4%BC%98%E5%8A%BF"><span class="toc-text">为什么 TD error 能拿来估计优势</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#7-GAE%EF%BC%9A%E6%8A%8A%E5%90%8E%E9%9D%A2%E5%87%A0%E6%AD%A5%E7%9A%84-TD-error-%E4%B9%9F%E5%88%A9%E7%94%A8%E8%B5%B7%E6%9D%A5"><span class="toc-text">7. GAE：把后面几步的 TD error 也利用起来</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E8%BF%99%E4%BA%9B%E6%9D%83%E9%87%8D%E4%B8%BA%E4%BB%80%E4%B9%88%E8%BF%99%E6%A0%B7%E5%8F%96"><span class="toc-text">这些权重为什么这样取</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%BB%A3%E7%A0%81%E4%B8%BA%E4%BB%80%E4%B9%88%E4%BB%8E%E5%90%8E%E5%BE%80%E5%89%8D%E7%AE%97"><span class="toc-text">代码为什么从后往前算</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#8-%E4%B8%BA%E4%BB%80%E4%B9%88%E4%BC%98%E5%8C%96%E7%BD%91%E7%BB%9C%E5%8F%82%E6%95%B0%EF%BC%8C%E8%80%8C%E4%B8%8D%E6%98%AF%E6%8A%8A-action-%E6%94%B9%E5%A5%BD"><span class="toc-text">8. 为什么优化网络参数，而不是把 action 改好</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#9-%E7%AD%96%E7%95%A5%E6%A2%AF%E5%BA%A6%E4%B8%BA%E4%BB%80%E4%B9%88%E8%83%BD%E7%94%A8%E4%BC%98%E5%8A%BF%E6%9D%A5%E5%8A%A0%E6%9D%83"><span class="toc-text">9. 策略梯度为什么能用优势来加权</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#10-%E4%BB%8E%E6%99%AE%E9%80%9A%E7%AD%96%E7%95%A5%E6%A2%AF%E5%BA%A6%E5%88%B0-TRPO%EF%BC%9A%E4%B8%BA%E4%BB%80%E4%B9%88%E4%B8%8D%E8%83%BD%E4%B8%80%E6%89%B9%E6%95%B0%E6%8D%AE%E4%B8%80%E7%9B%B4%E6%94%B9"><span class="toc-text">10. 从普通策略梯度到 TRPO：为什么不能一批数据一直改</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#11-PPO%EF%BC%9A%E6%8A%8A%E2%80%9C%E5%88%AB%E6%94%B9%E5%A4%AA%E8%BF%9C%E2%80%9D%E5%86%99%E8%BF%9B%E7%9B%AE%E6%A0%87%E5%87%BD%E6%95%B0"><span class="toc-text">11. PPO：把“别改太远”写进目标函数</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#PPO-%E5%92%8C-GAE-%E5%88%86%E5%88%AB%E8%A7%A3%E5%86%B3%E5%93%AA%E4%B8%80%E6%AD%A5%E7%9A%84%E9%97%AE%E9%A2%98"><span class="toc-text">PPO 和 GAE 分别解决哪一步的问题</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%8A%8A%E4%B8%80%E8%BD%AE%E8%AE%AD%E7%BB%83%E4%BB%8E%E5%A4%B4%E6%8E%A5%E8%B5%B7%E6%9D%A5"><span class="toc-text">把一轮训练从头接起来</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#PPO-%E7%9A%84%E5%A5%BD%E5%A4%84%EF%BC%8C%E6%94%BE%E5%88%B0%E5%85%A8%E8%BA%AB%E6%8E%A7%E5%88%B6%E8%AE%AD%E7%BB%83%E9%87%8C%E7%9C%8B"><span class="toc-text">PPO 的好处，放到全身控制训练里看</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%94%A8%E4%B8%80%E4%BB%BD%E5%AE%9E%E9%99%85%E8%AE%AD%E7%BB%83%E9%85%8D%E7%BD%AE%E7%AE%97%E4%B8%80%E9%81%8D"><span class="toc-text">用一份实际训练配置算一遍</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E8%AE%AD%E7%BB%83%E4%B8%8D%E7%A8%B3%E6%97%B6%EF%BC%8C%E6%80%8E%E6%A0%B7%E6%B2%BF%E7%9D%80%E8%BF%99%E6%9D%A1%E9%80%BB%E8%BE%91%E6%9F%A5"><span class="toc-text">训练不稳时，怎样沿着这条逻辑查</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%9D%A2%E8%AF%95%E9%97%AE%E2%80%9C%E4%B8%BA%E4%BB%80%E4%B9%88%E9%80%89-PPO%E2%80%9D%EF%BC%8C%E5%8F%AF%E4%BB%A5%E6%80%8E%E6%A0%B7%E5%9B%9E%E7%AD%94"><span class="toc-text">面试问“为什么选 PPO”，可以怎样回答</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#12-SAC-%E6%98%AF%E4%BB%80%E4%B9%88%EF%BC%9A%E8%AE%A9%E6%97%A7%E7%BB%8F%E9%AA%8C%E7%95%99%E4%B8%8B%E6%9D%A5%EF%BC%8C%E5%AD%A6%E4%B9%A0%E5%8A%A8%E4%BD%9C%E4%BB%B7%E5%80%BC-Q"><span class="toc-text">12. SAC 是什么：让旧经验留下来，学习动作价值 Q</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#13-%E6%8E%A5%E5%88%B0%E6%9C%BA%E5%99%A8%E4%BA%BA%E4%B8%8A%EF%BC%9A%E5%8A%A8%E4%BD%9C%E5%B0%BA%E5%BA%A6%E5%92%8C%E9%87%87%E6%A0%B7%E6%97%B6%E9%97%B4%E4%BB%8D%E8%A6%81%E5%AF%B9%E9%BD%90"><span class="toc-text">13. 接到机器人上：动作尺度和采样时间仍要对齐</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#14-%E4%BB%BB%E5%8A%A1%E5%A5%96%E5%8A%B1%EF%BC%9A%E5%9F%BA%E7%A1%80%E9%A2%84%E8%AE%BE%E5%92%8C-FastSAC-%E9%A2%84%E8%AE%BE%E5%B7%AE%E5%9C%A8%E5%93%AA%E9%87%8C"><span class="toc-text">14. 任务奖励：基础预设和 FastSAC 预设差在哪里</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%80%90%E9%A1%B9%E5%AE%9E%E7%8E%B0"><span class="toc-text">逐项实现</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%8E%AF%E5%A2%83%E5%A5%96%E5%8A%B1%E5%92%8C%E4%BC%98%E5%8C%96%E5%99%A8%E6%8D%9F%E5%A4%B1%E5%88%86%E4%B8%A4%E5%B1%82%E7%9C%8B"><span class="toc-text">环境奖励和优化器损失分两层看</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%98%85%E8%AF%BB%E4%B8%8E%E5%AE%9E%E7%8E%B0%E4%BE%9D%E6%8D%AE"><span class="toc-text">阅读与实现依据</span></a></li></ol></div></div><div class="card-widget card-recent-post"><div class="item-headline"><i class="fas fa-history"></i><span>最新文章</span></div><div class="aside-list"><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/10/08/whole-body-controllers-why-protomotions/" title="人形机器人全身控制器对比：为什么选择 ProtoMotions">人形机器人全身控制器对比：为什么选择 ProtoMotions</a><time datetime="2026-10-08T15:14:09.000Z" title="发表于 2026-10-08 23:14:09">2026-10-08</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/09/06/compliance-gentle-omni-falcon/" title="从动作跟踪到柔顺交互：参考动力学与接触控制">从动作跟踪到柔顺交互：参考动力学与接触控制</a><time datetime="2026-09-06T08:53:41.000Z" title="发表于 2026-09-06 16:53:41">2026-09-06</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/08/13/protomotions-oli-controller/" title="基于 ProtoMotions 的全身控制器训练与部署">基于 ProtoMotions 的全身控制器训练与部署</a><time datetime="2026-08-13T13:07:26.000Z" title="发表于 2026-08-13 21:07:26">2026-08-13</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/07/24/retargeting-gmr-pyroki-omni/" title="人体动作重定向原理与实现：GMR、PyRoKi 与 OmniRetarget">人体动作重定向原理与实现：GMR、PyRoKi 与 OmniRetarget</a><time datetime="2026-07-23T16:32:57.000Z" title="发表于 2026-07-24 00:32:57">2026-07-24</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/06/17/beyondmimic-control-foundations/" title="BeyondMimic 全身动作跟踪原理与机器人适配">BeyondMimic 全身动作跟踪原理与机器人适配</a><time datetime="2026-06-17T11:46:12.000Z" title="发表于 2026-06-17 19:46:12">2026-06-17</time></div></div></div></div></div></div></main><footer id="footer"><div class="footer-other"><div class="footer-copyright"><span class="copyright">&copy;&nbsp;2026 By Xi Zeng</span></div><div class="footer_custom_text">在这一隅角落，获得知识与灵魂的心安之所<br>Find in this little corner a place of peace for knowledge and the soul.</div></div></footer></div><div id="rightside"><div id="rightside-config-hide"><button id="readmode" type="button" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="translateLink" type="button" title="简繁转换">繁</button><button id="darkmode" type="button" title="日间和夜间模式切换"><i class="fas fa-adjust"></i></button><button id="hide-aside-btn" type="button" title="单栏和双栏切换"><i class="fas fa-arrows-alt-h"></i></button></div><div id="rightside-config-show"><button id="rightside-config" type="button" title="设置"><i class="fas fa-cog fa-spin"></i></button><button class="close" id="mobile-toc-button" type="button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" type="button" title="回到顶部"><span class="scroll-percent"></span><i class="fas fa-arrow-up"></i></button></div></div><div><script src="/js/utils.js?v=5.5.4"></script><script src="/js/main.js?v=5.5.4"></script><script src="/js/tw_cn.js?v=5.5.4"></script><div class="js-pjax"><script>(() => {
+  const loadMathjax = () => {
+    if (!window.MathJax) {
+      window.MathJax = {
+        loader: {
+          load: [
+            // Four font extension packages (optional)
+            //- '[tex]/bbm',
+            //- '[tex]/bboldx',
+            //- '[tex]/dsfont',
+            '[tex]/mhchem'
+          ],
+          paths: {
+            'mathjax-newcm': '[mathjax]/../@mathjax/mathjax-newcm-font',
+
+            //- // Four font extension packages (optional)
+            //- 'mathjax-bbm-extension': '[mathjax]/../@mathjax/mathjax-bbm-font-extension',
+            //- 'mathjax-bboldx-extension': '[mathjax]/../@mathjax/mathjax-bboldx-font-extension',
+            //- 'mathjax-dsfont-extension': '[mathjax]/../@mathjax/mathjax-dsfont-font-extension',
+            'mathjax-mhchem-extension': '[mathjax]/../@mathjax/mathjax-mhchem-font-extension'
+          }
+        },
+        output: {
+          font: 'mathjax-newcm',
+        },
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          tags: 'none',
+          packages: {
+            '[+]': [
+              'mhchem'
+            ]
+          }
+        },
+        chtml: {
+          scale: 1.1
+        },
+        options: {
+          enableMenu: true,
+          menuOptions: {
+            settings: {
+              enrich: false  // Turn off Braille and voice narration text automatic generation
+            }
+          },
+          renderActions: {
+            findScript: [10, doc => {
+              for (const node of document.querySelectorAll('script[type^="math/tex"]')) {
+                const display = !!node.type.match(/; *mode=display/)
+                const math = new doc.options.MathItem(node.textContent, doc.inputJax[0], display)
+                const text = document.createTextNode('')
+                node.parentNode.replaceChild(text, node)
+                math.start = {node: text, delim: '', n: 0}
+                math.end = {node: text, delim: '', n: 0}
+                doc.math.push(math)
+              }
+            }, '']
+          }
+        }
+      }
+
+      const script = document.createElement('script')
+      script.src = 'https://cdn.jsdelivr.net/npm/mathjax@4.1.0/tex-mml-chtml.min.js'
+      script.id = 'MathJax-script'
+      script.async = true
+      document.head.appendChild(script)
+    } else {
+      MathJax.startup.document.state(0)
+      MathJax.texReset()
+      MathJax.typesetPromise()
+    }
+  }
+
+  btf.addGlobalFn('encrypt', loadMathjax, 'mathjax')
+  window.pjax ? loadMathjax() : window.addEventListener('load', loadMathjax)
+})()</script></div><div class="aplayer no-destroy" data-id="2166217715" data-server="netease" data-type="song" data-fixed="true" data-mini="true" data-listFolded="false" data-order="random" data-lrctype="1" data-preload="none" data-autoplay="false" muted></div><canvas class="fireworks" mobile="false"></canvas><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/dist/fireworks.min.js"></script><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.js"></script><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/metingjs/dist/Meting.min.js"></script><script>(() => {
+  const destroyAplayer = () => {
+    if (window.aplayers) {
+      for (let i = 0; i < window.aplayers.length; i++) {
+        if (!window.aplayers[i].options.fixed) {
+          window.aplayers[i].destroy()
+        }
+      }
+    }
+  }
+
+  const runMetingJS = () => {
+    typeof loadMeting === 'function' && document.getElementsByClassName('aplayer').length && loadMeting()
+  }
+
+  btf.addGlobalFn('pjaxSend', destroyAplayer, 'destroyAplayer')
+  btf.addGlobalFn('pjaxComplete', loadMeting, 'runMetingJS')
+})()</script><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js" defer="defer"></script><script>document.addEventListener('DOMContentLoaded', () => {
+  const pjaxSelectors = ["head > title","#config-diff","#body-wrap","#rightside-config-hide","#rightside-config-show",".js-pjax"]
+
+  window.pjax = new Pjax({
+    elements: 'a:not([target="_blank"])',
+    selectors: pjaxSelectors,
+    cacheBust: false,
+    analytics: false,
+    scrollRestoration: false
+  })
+
+  const triggerPjaxFn = (val) => {
+    if (!val) return
+    Object.values(val).forEach(fn => {
+      try {
+        fn()
+      } catch (err) {
+        console.debug('Pjax callback failed:', err)
+      }
+    })
+  }
+
+  document.addEventListener('pjax:send', () => {
+    // removeEventListener
+    btf.removeGlobalFnEvent('pjaxSendOnce')
+    btf.removeGlobalFnEvent('themeChange')
+
+    // reset readmode
+    const $bodyClassList = document.body.classList
+    if ($bodyClassList.contains('read-mode')) $bodyClassList.remove('read-mode')
+
+    triggerPjaxFn(window.globalFn.pjaxSend)
+  })
+
+  document.addEventListener('pjax:complete', () => {
+    btf.removeGlobalFnEvent('pjaxCompleteOnce')
+    document.querySelectorAll('script[data-pjax]').forEach(item => {
+      const newScript = document.createElement('script')
+      const content = item.text || item.textContent || item.innerHTML || ""
+      Array.from(item.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value))
+      newScript.appendChild(document.createTextNode(content))
+      item.parentNode.replaceChild(newScript, item)
+    })
+
+    triggerPjaxFn(window.globalFn.pjaxComplete)
+  })
+
+  document.addEventListener('pjax:error', e => {
+    if (e.request.status === 404) {
+      false
+        ? pjax.loadUrl('/404.html')
+        : window.location.href = e.request.responseURL
+    }
+  })
+})</script><script async data-pjax src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script></div></body></html>

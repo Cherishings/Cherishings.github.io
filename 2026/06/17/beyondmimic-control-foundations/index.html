@@ -1,0 +1,1009 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1.0,viewport-fit=cover"><title>BeyondMimic 全身动作跟踪原理与机器人适配 | Xi Zeng's Blog</title><meta name="author" content="Xi Zeng"><meta name="copyright" content="Xi Zeng"><meta name="format-detection" content="telephone=no"><meta name="theme-color" content="#ffffff"><meta name="description" content="拆解 BeyondMimic 的参考、观测、跟踪奖励与采样机制，以逐际动力平台为例计算 armature、PD 增益和动作尺度，并对照不同执行器接口、碰撞几何与接触惩罚的实际差异。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="BeyondMimic 全身动作跟踪原理与机器人适配">
+<meta property="og:url" content="https://cherishxi.xyz/2026/06/17/beyondmimic-control-foundations/index.html">
+<meta property="og:site_name" content="Xi Zeng&#39;s Blog">
+<meta property="og:description" content="拆解 BeyondMimic 的参考、观测、跟踪奖励与采样机制，以逐际动力平台为例计算 armature、PD 增益和动作尺度，并对照不同执行器接口、碰撞几何与接触惩罚的实际差异。">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://cherishxi.xyz/img/photo.JPG">
+<meta property="article:published_time" content="2026-06-17T11:46:12.000Z">
+<meta property="article:modified_time" content="2026-10-27T16:00:00.000Z">
+<meta property="article:author" content="Xi Zeng">
+<meta property="article:tag" content="BeyondMimic">
+<meta property="article:tag" content="PD控制">
+<meta property="article:tag" content="仿真">
+<meta property="article:tag" content="全身控制">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://cherishxi.xyz/img/photo.JPG"><script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "BeyondMimic 全身动作跟踪原理与机器人适配",
+  "url": "https://cherishxi.xyz/2026/06/17/beyondmimic-control-foundations/",
+  "image": "https://cherishxi.xyz/img/photo.JPG",
+  "datePublished": "2026-06-17T11:46:12.000Z",
+  "dateModified": "2026-10-27T16:00:00.000Z",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "Xi Zeng",
+      "url": "https://cherishxi.xyz"
+    }
+  ]
+}</script><link rel="shortcut icon" href="/img/logo.JPG"><link rel="canonical" href="https://cherishxi.xyz/2026/06/17/beyondmimic-control-foundations/index.html"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><link rel="stylesheet" href="/css/index.css?v=5.5.4"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.1.0/css/all.min.css"><script>
+    (() => {
+      
+    const saveToLocal = {
+      set: (key, value, ttl) => {
+        if (!ttl) return
+        const expiry = Date.now() + ttl * 86400000
+        localStorage.setItem(key, JSON.stringify({ value, expiry }))
+      },
+      get: key => {
+        const itemStr = localStorage.getItem(key)
+        if (!itemStr) return undefined
+        const { value, expiry } = JSON.parse(itemStr)
+        if (Date.now() > expiry) {
+          localStorage.removeItem(key)
+          return undefined
+        }
+        return value
+      }
+    }
+
+    window.btf = {
+      saveToLocal,
+      getScript: (url, attr = {}) => new Promise((resolve, reject) => {
+        const script = document.createElement('script')
+        script.src = url
+        script.async = true
+        Object.entries(attr).forEach(([key, val]) => script.setAttribute(key, val))
+        script.onload = script.onreadystatechange = () => {
+          if (!script.readyState || /loaded|complete/.test(script.readyState)) resolve()
+        }
+        script.onerror = reject
+        document.head.appendChild(script)
+      }),
+      getCSS: (url, id) => new Promise((resolve, reject) => {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = url
+        if (id) link.id = id
+        link.onload = link.onreadystatechange = () => {
+          if (!link.readyState || /loaded|complete/.test(link.readyState)) resolve()
+        }
+        link.onerror = reject
+        document.head.appendChild(link)
+      }),
+      addGlobalFn: (key, fn, name = false, parent = window) => {
+        if (!true && key.startsWith('pjax')) return
+        const globalFn = parent.globalFn || {}
+        globalFn[key] = globalFn[key] || {}
+        globalFn[key][name || Object.keys(globalFn[key]).length] = fn
+        parent.globalFn = globalFn
+      }
+    }
+  
+      
+      const activateDarkMode = () => {
+        document.documentElement.setAttribute('data-theme', 'dark')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d0d0d')
+        }
+      }
+      const activateLightMode = () => {
+        document.documentElement.setAttribute('data-theme', 'light')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
+        }
+      }
+
+      btf.activateDarkMode = activateDarkMode
+      btf.activateLightMode = activateLightMode
+
+      const theme = saveToLocal.get('theme')
+    
+          theme === 'dark' ? activateDarkMode() : theme === 'light' ? activateLightMode() : null
+        
+      
+      const asideStatus = saveToLocal.get('aside-status')
+      if (asideStatus !== undefined) {
+        document.documentElement.classList.toggle('hide-aside', asideStatus === 'hide')
+      }
+    
+      
+    const detectApple = () => {
+      if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent)) {
+        document.documentElement.classList.add('apple')
+      }
+    }
+    detectApple()
+  
+    })()
+  </script><script>const GLOBAL_CONFIG = {
+  root: '/',
+  algolia: undefined,
+  localSearch: undefined,
+  translate: {"defaultEncoding":2,"translateDelay":0,"msgToTraditionalChinese":"繁","msgToSimplifiedChinese":"簡"},
+  highlight: {"plugin":"highlight.js","highlightCopy":true,"highlightLang":true,"highlightHeightLimit":false,"highlightFullpage":false,"highlightMacStyle":false},
+  copy: {
+    success: '复制成功',
+    error: '复制失败',
+    noSupport: '浏览器不支持'
+  },
+  relativeDate: {
+    homepage: false,
+    post: false
+  },
+  runtime: '',
+  dateSuffix: {
+    just: '刚刚',
+    min: '分钟前',
+    hour: '小时前',
+    day: '天前',
+    month: '个月前'
+  },
+  copyright: undefined,
+  lightbox: 'null',
+  Snackbar: undefined,
+  infinitegrid: {
+    js: 'https://cdn.jsdelivr.net/npm/@egjs/infinitegrid@4.13.0/dist/infinitegrid.min.js',
+    buttonText: '加载更多'
+  },
+  isPhotoFigcaption: false,
+  islazyloadPlugin: false,
+  isAnchor: false,
+  percent: {
+    toc: true,
+    rightside: true,
+  },
+  autoDarkmode: false
+}</script><script id="config-diff">var GLOBAL_CONFIG_SITE = {
+  title: 'BeyondMimic 全身动作跟踪原理与机器人适配',
+  isHighlightShrink: false,
+  isToc: true,
+  pageType: 'post'
+}</script><style>.aplayer.aplayer-fixed{opacity:0.08 !important;transition:opacity 0.4s ease !important;} .aplayer.aplayer-fixed:hover{opacity:1 !important;}</style><style>#web_bg::after{content:'';position:fixed;inset:0;background:rgba(8,8,22,0.5);pointer-events:none;z-index:0;} #footer{background-color:#574E91 !important;} #page-header:not(.full_page){background:transparent !important;} .recent-post-item,.card-widget{background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border:1px solid transparent !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;color:#1a1a2e !important;transition:transform 0.3s ease,box-shadow 0.3s ease !important;background-clip:padding-box !important;outline:1.5px solid transparent;position:relative;} .recent-post-item::before,.card-widget::before{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;} .recent-post-item:hover,.card-widget:hover{transform:translateY(-4px) !important;box-shadow:0 12px 36px rgba(80,120,255,0.25) !important;} .recent-post-item a,.card-widget a{color:#3a5a8a !important;} .recent-post-item .article-meta,.card-widget .article-meta{color:#555 !important;}</style><style>.type-tags #page{background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;padding:60px 50px !important;position:relative;overflow:hidden} .type-tags #page::before{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-tags .tag-cloud-list{padding:10px 0;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:12px} .type-tags .tag-cloud-list a{font-size:1.05em !important;padding:10px 24px !important;border-radius:30px !important;margin:0 !important;font-weight:700 !important;letter-spacing:0.06em !important;text-shadow:0 1px 3px rgba(0,0,0,0.18) !important;transition:transform 0.25s,box-shadow 0.25s !important} .type-tags .tag-cloud-list a:hover{transform:translateY(-4px) scale(1.08) !important;box-shadow:0 10px 28px rgba(0,0,0,0.28) !important;filter:brightness(1.1)} .type-tags .tag-cloud-item.tag-color-0{background:linear-gradient(135deg,#4a90d9,#357abd) !important;box-shadow:0 4px 14px rgba(74,144,217,0.45) !important} .type-tags .tag-cloud-item.tag-color-1{background:linear-gradient(135deg,#7c4dbd,#5e35b1) !important;box-shadow:0 4px 14px rgba(124,77,189,0.45) !important} .type-tags .tag-cloud-item.tag-color-2{background:linear-gradient(135deg,#2eb88a,#1a9970) !important;box-shadow:0 4px 14px rgba(46,184,138,0.45) !important} .type-tags .tag-cloud-item.tag-color-3{background:linear-gradient(135deg,#e06c75,#c0392b) !important;box-shadow:0 4px 14px rgba(224,108,117,0.45) !important} .type-tags .tag-cloud-item.tag-color-4{background:linear-gradient(135deg,#d4954a,#b8732a) !important;box-shadow:0 4px 14px rgba(212,149,74,0.45) !important} .type-tags .tag-cloud-item.tag-color-5{background:linear-gradient(135deg,#5b8dee,#3a6fd8) !important;box-shadow:0 4px 14px rgba(91,141,238,0.45) !important} .type-tags .tag-cloud-item.tag-color-6{background:linear-gradient(135deg,#c96db5,#a84d99) !important;box-shadow:0 4px 14px rgba(201,109,181,0.45) !important} .type-tags .tag-cloud-item.tag-color-7{background:linear-gradient(135deg,#3aacb8,#228b96) !important;box-shadow:0 4px 14px rgba(58,172,184,0.45) !important}</style><style>.type-categories #page{background:transparent !important;backdrop-filter:none !important;box-shadow:none !important;border:none !important;padding:0 !important} .type-categories #page::before{display:none} .type-categories .category-lists{padding:0} .type-categories .category-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:20px} .type-categories .category-list>.category-list-item{width:100%;max-width:100%;list-style:none;background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border:1px solid transparent !important;background-clip:padding-box !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;padding:28px 28px 20px !important;position:relative;transition:transform 0.3s ease,box-shadow 0.3s ease !important;color:#1a1a2e !important} .type-categories .category-list>.category-list-item::before{display:none !important} .type-categories .category-list>.category-list-item::after{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-categories .category-list-child .category-list-item::before{display:none !important} .type-categories .category-list>.category-list-item:hover{transform:translateY(-4px) !important;box-shadow:0 12px 36px rgba(80,120,255,0.25) !important} .type-categories .category-list>.category-list-item>.category-list-link{display:block;font-size:1.25em;font-weight:800;color:#1a1a2e !important;letter-spacing:0.04em;margin-bottom:6px} .type-categories .category-list>.category-list-item>.category-list-link:hover{color:#4a90d9 !important} .type-categories .category-list>.category-list-item>.category-list-count{display:block;font-size:0.82em;color:#888 !important;font-weight:400;margin-bottom:16px} .type-categories .category-list>.category-list-item>.category-list-count::before{content:'共 '} .type-categories .category-list>.category-list-item>.category-list-count::after{content:' 篇'} .type-categories .category-list-child{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px} .type-categories .category-list-child .category-list-item{flex:0 0 auto;list-style:none} .type-categories .category-list-child .category-list-link{display:inline-block;padding:8px 20px;border-radius:24px;background:linear-gradient(135deg,rgba(91,141,238,0.15),rgba(124,77,189,0.12));color:#3a5a8a !important;font-size:1.05em;font-weight:700;border:1.5px solid rgba(91,141,238,0.3);transition:all 0.2s} .type-categories .category-list-child .category-list-link:hover{background:linear-gradient(135deg,#5b8dee,#7c4dbd) !important;color:#fff !important;border-color:transparent;transform:translateY(-2px);box-shadow:0 4px 12px rgba(91,141,238,0.35)} .type-categories .category-list-child .category-list-count{display:none}</style><style>.type-about #web_bg{display:none !important;} body.type-about{background:url('/img/dream.JPG') center center / cover no-repeat fixed !important;} .type-about #page{background:rgba(10,10,30,0.65) !important;backdrop-filter:blur(18px) !important;-webkit-backdrop-filter:blur(18px) !important;border-radius:16px !important;box-shadow:0 6px 32px rgba(0,0,0,0.6) !important;padding:60px 50px !important;position:relative;overflow:hidden;color:#e8eaf6 !important} .type-about #page::before{content:'';position:absolute;inset:0;border-radius:16px;padding:2px;background:linear-gradient(135deg,rgba(160,120,255,0.7),rgba(80,160,255,0.5),rgba(140,100,255,0.6));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-about #page h2{color:#c8b4ff !important;font-size:1.6em !important;} .type-about #page p,.type-about #page li{color:#d0d8f0 !important;font-size:1.12em !important;line-height:1.9 !important;} .type-about #page strong{color:#b0c8ff !important;} .type-about #page a{color:#90caf9 !important;}</style><style>.type-link #page{background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;padding:60px 50px !important;position:relative;overflow:hidden} .type-link #page::before{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-link .flink-list-item{position:relative;background:rgba(255,255,255,0.93) !important;backdrop-filter:blur(12px) !important;-webkit-backdrop-filter:blur(12px) !important;border:1px solid transparent !important;background-clip:padding-box !important;border-radius:16px !important;box-shadow:0 4px 24px rgba(0,0,0,0.3) !important;transition:transform 0.3s ease,box-shadow 0.3s ease !important;overflow:visible !important} .type-link .flink-list-item::after{content:'';position:absolute;inset:0;border-radius:16px;padding:3px;background:linear-gradient(135deg,rgba(100,160,255,0.6),rgba(180,100,255,0.4),rgba(100,200,255,0.5));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none} .type-link .flink-list-item:hover{transform:translateY(-4px) !important;box-shadow:0 12px 36px rgba(80,120,255,0.25) !important}</style><meta name="generator" content="Hexo 8.1.1"></head><body><div class="bg-animation" id="web_bg" style="background-image: url(/img/background.JPG);"></div><div id="sidebar"><div id="menu-mask"></div><div id="sidebar-menus"><div class="avatar-img text-center"><img src="/img/photo.JPG" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="site-data text-center"><a href="/archives/"><div class="headline">文章</div><div class="length-num">14</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">32</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">14</div></a></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 主页</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 专栏</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 主题</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-user"></i><span> 关于</span></a></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友情链接</span></a></div></div></div></div><div class="post" id="body-wrap"><header class="post-bg" id="page-header"><nav id="nav"><span id="blog-info"><a class="nav-site-title" href="/"><img class="site-icon" src="/img/logo.JPG" alt="Logo"><span class="site-name">Xi Zeng's Blog</span></a><a class="nav-page-title" href="/"><span class="site-name">BeyondMimic 全身动作跟踪原理与机器人适配</span><span class="site-name"><i class="fa-solid fa-circle-arrow-left"></i><span>  返回首页</span></span></a></span><div id="menus"><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 主页</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 专栏</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 主题</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-user"></i><span> 关于</span></a></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友情链接</span></a></div></div><div id="toggle-menu"><span class="site-page"><i class="fas fa-bars fa-fw"></i></span></div></div></nav><div id="post-info"><h1 class="post-title">BeyondMimic 全身动作跟踪原理与机器人适配</h1><div id="post-meta"><div class="meta-firstline"><span class="post-meta-date"><i class="far fa-calendar-alt fa-fw post-meta-icon"></i><span class="post-meta-label">发表于</span><time class="post-meta-date-created" datetime="2026-06-17T11:46:12.000Z" title="发表于 2026-06-17 19:46:12">2026-06-17</time><span class="post-meta-separator">|</span><i class="fas fa-history fa-fw post-meta-icon"></i><span class="post-meta-label">更新于</span><time class="post-meta-date-updated" datetime="2026-10-27T16:00:00.000Z" title="更新于 2026-10-28 00:00:00">2026-10-28</time></span><span class="post-meta-categories"><span class="post-meta-separator">|</span><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/%E5%B7%A5%E7%A8%8B%E5%AE%9E%E8%B7%B5/">工程实践</a><i class="fas fa-angle-right post-meta-separator"></i><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/%E5%B7%A5%E7%A8%8B%E5%AE%9E%E8%B7%B5/%E5%85%A8%E8%BA%AB%E6%8E%A7%E5%88%B6/">全身控制</a></span></div><div class="meta-secondline"><span class="post-meta-separator">|</span><span class="post-meta-wordcount"><i class="far fa-file-word fa-fw post-meta-icon"></i><span class="post-meta-label">总字数:</span><span class="word-count">11k</span><span class="post-meta-separator">|</span><i class="far fa-clock fa-fw post-meta-icon"></i><span class="post-meta-label">阅读时长:</span><span>37分钟</span></span><span class="post-meta-separator">|</span><span class="post-meta-pv-cv" id="" data-flag-title=""><i class="far fa-eye fa-fw post-meta-icon"></i><span class="post-meta-label">浏览量:</span><span id="busuanzi_value_page_pv"><i class="fa-solid fa-spinner fa-spin"></i></span></span></div></div></div></header><main class="layout" id="content-inner"><div id="post"><article class="container post-content" id="article-container"><p>动作回放可以直接设置机器人姿态，动作跟踪则必须靠电机力矩和地面接触改变状态。BeyondMimic 中的策略学的是后者：根据参考和当前状态不断纠偏，在关节限位、力矩饱和与平衡要求下完成动作。</p>
+<p>本文从 BeyondMimic 在 G1 上的执行器参数化出发，分析逐际动力平台上的动作跟踪适配。逐际 SDK 随附的行走控制器、独立训练的速度跟踪策略、Omni 交互适配和 BeyondMimic 动作跟踪使用不同的控制接口，下面分别对照。文中的参数来自这些实现及训练时导出的配置；解析计算用于解释参数关系，不代替执行器辨识。</p>
+<p><img src="/img/control-series/papers/beyondmimic-overview.png" alt="BeyondMimic 论文的训练、蒸馏与引导控制流程"></p>
+<p><em>论文原图：Truong、Liao 等，BeyondMimic，Figure 1；未修改，版权归原作者。来源：<a target="_blank" rel="noopener" href="https://arxiv.org/abs/2508.08241v1">论文</a>／<a target="_blank" rel="noopener" href="https://arxiv.org/html/2508.08241v1/sys_fig_v5.png">原图</a>。图中平台和结果来自论文，并非本次机器人适配的实验。</em></p>
+<p>本文拆解的是图左上的 motion tracking 部分：<code>MotionCommand</code> 提供参考，奖励比较参考与实际状态，actor 输出关节目标。右侧的状态—动作扩散模型属于后续蒸馏与任务引导，不能因为跟踪代码可运行就宣称已复现这条完整路线。下面展开跟踪控制的计算过程。</p>
+<h2 id="1-跟踪策略学到的是反馈，而不是动作播放器"><a href="#1-跟踪策略学到的是反馈，而不是动作播放器" class="headerlink" title="1. 跟踪策略学到的是反馈，而不是动作播放器"></a>1. 跟踪策略学到的是反馈，而不是动作播放器</h2><p>机器人满足浮动基座动力学：</p>
+<script type="math/tex; mode=display">
+M(q)\ddot q+h(q,\dot q)=S_\tau^T\tau+J_c^Tf_c.</script><p>其中浮动基座不能直接施加关节驱动力矩，必须借助接触力 <script type="math/tex">f_c</script> 保持平衡。参考轨迹 <script type="math/tex">\hat q_t</script> 不一定满足这个方程，因此将其直接写入关节目标仍可能摔倒。</p>
+<p>接触还要服从单边性与摩擦关系。用理想刚性接触的简化记号，法向间距、法向力与切向力满足：</p>
+<script type="math/tex; mode=display">
+\phi(q)\ge0,\qquad f_n\ge0,\qquad
+\phi(q)f_n=0,\qquad \|f_t\|_2\le\mu f_n.</script><p>脚离地时不能靠地面拉住身体；没有足够法向支撑时，也不能任意产生切向力。例如摩擦系数 0.6、法向支撑 100 N，对应的理想切向力上限为 60 N。位置参考和跟踪奖励本身并没有提供额外的摩擦能力。这里说明接触物理的理想约束，实际仿真由碰撞几何与接触求解器近似处理；BeyondMimic 的 actor 并不在线求解这套互补约束。</p>
+<p>学习策略接收当前状态与参考条件，输出关节动作：</p>
+<script type="math/tex; mode=display">
+a_t=\pi(o_t,c_t),\qquad q_t^{\mathrm{des}}=q_0+S_a a_t.</script><p>这里要分清三个角度：参考角来自动作数据，目标角由 <code>q₀ + scale × a</code> 生成，实际角来自机器人状态。策略动作 a 是网络输出，尚未乘 scale 时不等于关节角。</p>
+<p>策略可以暂时偏离某个关节的参考，以维持整体平衡。它是否会这么做，取决于奖励、终止、训练分布与动作接口，不能仅靠“用了 PPO”推断。</p>
+<div class="retarget-flow tracking-flow" role="group" aria-label="全身跟踪闭环：参考、策略、动作映射、执行器与接触，以及状态反馈">
+    <div class="retarget-steps">
+      <div class="retarget-step"><strong>参考动作</strong><span>关节与身体目标<br>时刻、坐标系</span></div>
+      <div class="retarget-step"><strong>跟踪策略</strong><span>参考 + 当前观测<br>输出动作 a</span></div>
+      <div class="retarget-step"><strong>动作映射</strong><span>q* = q₀ + scale · a<br>得到关节位置目标</span></div>
+      <div class="retarget-step"><strong>执行与接触</strong><span>PD → 力矩限幅<br>惯性、碰撞、摩擦</span></div>
+      <div class="retarget-return"><span>关节状态、IMU 与历史 → 下一步观测</span></div>
+    </div>
+    <div class="retarget-methods"><div><strong>训练时的奖励</strong><span>比较参考与实际运动，用于更新策略参数；部署时由策略和执行器完成反馈控制。</span></div></div>
+  </div>
+<p><em>图 1：参考只作为条件和奖励目标进入闭环；实际身体状态由执行器和接触动力学产生。</em></p>
+<h2 id="2-参考与观测必须使用一致的坐标约定"><a href="#2-参考与观测必须使用一致的坐标约定" class="headerlink" title="2. 参考与观测必须使用一致的坐标约定"></a>2. 参考与观测必须使用一致的坐标约定</h2><p>一个常见 actor 观测包括：关节相对默认姿态、关节速度、机体角速度、参考关节状态、参考 anchor 相对姿态，以及上一时刻动作。critic 可以额外看到世界位置、身体速度等仿真信息。</p>
+<p>以 anchor 的 yaw 对齐为例，身体相对位置可以写为：</p>
+<script type="math/tex; mode=display">
+\tilde p_i=R_z(-\psi_a)(p_i-p_a).</script><p>它弱化绝对平移和朝向的影响，但不能随意把 yaw 对齐换成完整 roll–pitch–yaw 对齐：后者会移除部分与重力方向相关的信息。root、torso、waist anchor 也不是同一个刚体；腰部有自由度时，把胸部姿态当根节点姿态会产生随动作变化的误差。</p>
+<p>四元数必须明确顺序。对于同一个朝向，<code>xyzw</code> 与 <code>wxyz</code> 的四个数不是可以直接传递的接口。除长度为 4 外，还应测试单位范数、已知 90 度旋转和组合旋转方向。</p>
+<h2 id="3-奖励中的尺度决定策略愿意牺牲什么"><a href="#3-奖励中的尺度决定策略愿意牺牲什么" class="headerlink" title="3. 奖励中的尺度决定策略愿意牺牲什么"></a>3. 奖励中的尺度决定策略愿意牺牲什么</h2><p>典型跟踪项为：</p>
+<script type="math/tex; mode=display">
+r_p=\exp\left(-\frac{\|p-\hat p\|^2}{\sigma_p^2}\right).</script><p>若 <script type="math/tex">\sigma_p=0.3</script> m，在这个简化单误差例子中，误差 0.1、0.3、0.6 m 的奖励分别约为 0.895、0.368、0.018。<script type="math/tex">\sigma</script> 不只是一个“收敛参数”，它决定错误多大时该项仍提供明显差异。</p>
+<p>BeyondMimic 的基础奖励包含 anchor 位置和方向、身体相对位置与方向、身体线速度和角速度，以及动作变化、关节限位、非期望接触等惩罚。位置项的 <code>std=0.3</code>、方向项的 <code>std=0.4</code> 对应不同单位，不能直接比较数值大小判断哪个更严格。</p>
+<p>身体位置项在实现中先对三维误差平方求和，再对选定身体平均，最后进入指数核。带着具体聚合顺序，总回报可写为：</p>
+<script type="math/tex; mode=display">
+r_{\mathrm{body}}=\exp\left(-\frac{1}{B\sigma_p^2}
+\sum_{b=1}^B\|\tilde p_b-\tilde p_b^{\mathrm{ref}}\|_2^2\right),\qquad
+R_t=\Delta t_\pi\sum_k w_kr_{k,t}.</script><p>策略优化的是折扣累计 R，而不是直接最小化某一帧关节角误差。也不能把“平均平方误差后取 exp”换成“每个身体取 exp 后平均”：误差集中在少数身体时，两种聚合会给出不同奖励。下表的系数属于 w，<code>std</code> 属于核内部的 sigma，控制周期属于最外层的积分尺度。</p>
+<p>不要只盯关节角误差。腿部略有角度偏差但脚不滑，可能比关节角很像却地面穿透更好。是否允许这样的权衡，要由目标和评估指标明确规定。<a target="_blank" rel="noopener" href="https://beyondmimic.github.io/">BeyondMimic 项目与实现</a></p>
+<h3 id="权重-0-5-和-std-0-3，改的是两件事"><a href="#权重-0-5-和-std-0-3，改的是两件事" class="headerlink" title="权重 0.5 和 std 0.3，改的是两件事"></a>权重 0.5 和 std 0.3，改的是两件事</h3><p>对于同一条位置误差，<code>weight</code> 决定这项在总回报中的占比，<code>std</code> 决定误差进入指数函数前按多大尺度归一化。以 0.1 m 误差为例：</p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>设置</th>
+<th style="text-align:right">原始奖励</th>
+<th style="text-align:right">乘权重后</th>
+<th style="text-align:right">再乘 0.02 s 后</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>weight = 0.5，std = 0.3 m</td>
+<td style="text-align:right">0.89484</td>
+<td style="text-align:right">0.44742</td>
+<td style="text-align:right">0.00895</td>
+</tr>
+<tr>
+<td>weight = 1，std = 0.3 m</td>
+<td style="text-align:right">0.89484</td>
+<td style="text-align:right">0.89484</td>
+<td style="text-align:right">0.01790</td>
+</tr>
+<tr>
+<td>weight = 0.5，std = 0.1 m</td>
+<td style="text-align:right">0.36788</td>
+<td style="text-align:right">0.18394</td>
+<td style="text-align:right">0.00368</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>权重翻倍，所有误差下的贡献都翻倍。std 缩小，则重新分配了不同误差区间的奖励差异：远离目标时可能几乎全是零，靠近目标后才明显区分。它不会把物理碰撞变得更硬，也不会改变 PD 增益。<code>std=0.4 rad</code> 约为 22.9°，对应方向误差；不能拿它与 0.3 m 的位置尺度直接比大小。</p>
+<h3 id="基础跟踪任务的九项奖励"><a href="#基础跟踪任务的九项奖励" class="headerlink" title="基础跟踪任务的九项奖励"></a>基础跟踪任务的九项奖励</h3><p>下面列出基础跟踪任务沿用的九项奖励及其系数。后文的选择性自碰撞方案另加五项接触／接近惩罚，不计入这张基础表。表列的是配置权重，Isaac Lab 的 RewardManager 在控制步内再乘 <code>step_dt</code>。这里物理步 0.005 s、decimation 4，因此控制步为 0.02 s；完美跟踪时六个正项合计 5，单步贡献为 0.1，未计惩罚。</p>
+<p>表下代码均为等价的核心计算示意，省略环境对象访问与索引解析。</p>
+<p>点击名称可跳到对应的公式与实现说明，并自动展开。</p>
+<div class="table-container">
+<div class="reward-table-wrap" tabindex="0" role="region" aria-label="奖励与代价参数表，可横向滚动"><table class="reward-table">
+<thead>
+<tr>
+<th>名称</th>
+<th>权重</th>
+<th>尺度／定义</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#reward-bm-0"><code>motion_global_anchor_pos</code></a></td>
+<td>0.5</td>
+<td>std = 0.3 m</td>
+<td>限制 anchor 全局漂移</td>
+</tr>
+<tr>
+<td><a href="#reward-bm-1"><code>motion_global_anchor_ori</code></a></td>
+<td>0.5</td>
+<td>std = 0.4 rad</td>
+<td>跟住 anchor 朝向</td>
+</tr>
+<tr>
+<td><a href="#reward-bm-2"><code>motion_body_pos</code></a></td>
+<td>1</td>
+<td>std = 0.3 m</td>
+<td>保留身体相对几何</td>
+</tr>
+<tr>
+<td><a href="#reward-bm-3"><code>motion_body_ori</code></a></td>
+<td>1</td>
+<td>std = 0.4 rad</td>
+<td>保留各身体姿态</td>
+</tr>
+<tr>
+<td><a href="#reward-bm-4"><code>motion_body_lin_vel</code></a></td>
+<td>1</td>
+<td>std = 1 m/s</td>
+<td>匹配平移速度</td>
+</tr>
+<tr>
+<td><a href="#reward-bm-5"><code>motion_body_ang_vel</code></a></td>
+<td>1</td>
+<td>std = 3.14 rad/s</td>
+<td>匹配转动速度</td>
+</tr>
+<tr>
+<td><a href="#reward-bm-6"><code>action_rate_l2</code></a></td>
+<td>−0.1</td>
+<td>原始动作平方和</td>
+<td>抑制动作抖动</td>
+</tr>
+<tr>
+<td><a href="#reward-bm-7"><code>joint_limit</code></a></td>
+<td>−10</td>
+<td>软限位越界量，rad</td>
+<td>远离关节限位</td>
+</tr>
+<tr>
+<td><a href="#reward-bm-8"><code>undesired_contacts</code></a></td>
+<td>−0.1</td>
+<td>阈值 1 N</td>
+<td>减少不允许的身体碰撞</td>
+</tr>
+</tbody>
+</table></div>
+</div>
+<h3 id="逐项实现"><a href="#逐项实现" class="headerlink" title="逐项实现"></a>逐项实现</h3><details class="reward-detail" id="reward-bm-0"><summary>motion_global_anchor_pos</summary><div class="reward-detail-body"><p>实现 <code>motion_global_anchor_position_error_exp</code> 对 anchor 三轴位置差取平方和，再做指数核。权重 0.5 控制该项的贡献，0.3 m 控制容忍尺度。误差 0.3 m 时原始值约 0.3679；它不能保证机器人永不漂移。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">err2 = (p_anchor_ref - p_anchor).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">r = torch.exp(-err2 / <span class="number">0.3</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-bm-1"><summary>motion_global_anchor_ori</summary><div class="reward-detail-body"><p>实现 <code>motion_global_anchor_orientation_error_exp</code> 使用四元数的最短旋转角误差，先平方，再除以 0.4²。不要将四个四元数分量直接相减：q 和 −q 表示同一旋转。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">angle = quat_error_magnitude(q_ref, q_actual)</span><br><span class="line">r = torch.exp(-angle.square() / <span class="number">0.4</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-bm-2"><summary>motion_body_pos</summary><div class="reward-detail-body"><p>实现 <code>motion_relative_body_position_error_exp</code> 比较经过 anchor/yaw 对齐的参考身体位置与实际位置：先对 xyz 求平方和，再对身体取均值，最后求一次 exp。它不是逐身体 exp 后求平均。<code>MotionCommand</code> 对齐 XY 与 yaw 时保留参考 anchor 的 Z，因此身体高度误差仍在该项中；不是把全部 xyz 平移都消掉。身体列表改变后，每个部位在均值中的占比也会改变。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">err2 = (p_body_aligned - p_body).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">r = torch.exp(-err2.mean(-<span class="number">1</span>) / <span class="number">0.3</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-bm-3"><summary>motion_body_ori</summary><div class="reward-detail-body"><p>实现 <code>motion_relative_body_orientation_error_exp</code> 对每个身体计算最短旋转角，平方后在身体维度平均，再用 0.4 rad 核。相对目标的构造与位置项共享参考约定，不能把局部和世界四元数混用。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">angle = quat_error_magnitude(q_body_aligned, q_body)</span><br><span class="line">r = torch.exp(-angle.square().mean(-<span class="number">1</span>) / <span class="number">0.4</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-bm-4"><summary>motion_body_lin_vel</summary><div class="reward-detail-body"><p>实现 <code>motion_global_body_linear_velocity_error_exp</code> 比较世界系身体线速度，三轴平方和后对身体平均；1 m/s 是误差尺度。位置很接近但身体仍在快速冲过目标时，这项会降低奖励。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">err2 = (v_ref_w - v_w).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">r = torch.exp(-err2.mean(-<span class="number">1</span>) / <span class="number">1.0</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-bm-5"><summary>motion_body_ang_vel</summary><div class="reward-detail-body"><p>实现 <code>motion_global_body_angular_velocity_error_exp</code> 比较世界系身体角速度。3.14 rad/s 是指数核尺度，不是机器人最大允许角速度。它补充姿态项，但不能替代力矩限制。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">err2 = (omega_ref_w - omega_w).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">r = torch.exp(-err2.mean(-<span class="number">1</span>) / <span class="number">3.14</span>**<span class="number">2</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-bm-6"><summary>action_rate_l2</summary><div class="reward-detail-body"><p>Isaac Lab 的 <code>action_rate_l2</code> 返回连续两次动作之差的平方和，配置乘负权重。它没有除以控制周期，因此不是物理意义上的关节加速度。动作幅度和控制频率变化后，同一系数的效果也会变。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">cost = (action - previous_action).square().<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-bm-7"><summary>joint_limit</summary><div class="reward-detail-body"><p>Isaac Lab 的 <code>joint_pos_limits</code> 对上下软限位之外的距离取正部，按关节相加。原始量非负、权重为负，且这里不是平方惩罚。它是奖励代价，不能替代执行器硬限位。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">cost = ((lower_soft - q).clamp_min(<span class="number">0</span>)</span><br><span class="line">        + (q - upper_soft).clamp_min(<span class="number">0</span>)).<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<details class="reward-detail" id="reward-bm-8"><summary>undesired_contacts</summary><div class="reward-detail-body"><p>Isaac Lab 的 <code>undesired_contacts</code> 先在接触历史窗取每个身体的力范数峰值，超过 1 N 的身体记为 1，再求和。脚和允许接触的部位必须从筛选集合排除；阈值判断意味着超过 1 N 与超过 100 N 对同一个身体贡献一样。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">peak = contact_forces_history.norm(dim=-<span class="number">1</span>).amax(dim=<span class="number">1</span>)</span><br><span class="line">cost = (peak[:, forbidden_body_ids] &gt; <span class="number">1.0</span>).<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br></pre></td></tr></table></figure>
+</div></details>
+<h3 id="继承了系数，任务却不完全相同"><a href="#继承了系数，任务却不完全相同" class="headerlink" title="继承了系数，任务却不完全相同"></a>继承了系数，任务却不完全相同</h3><p>适配任务以腰部俯仰关节之后的躯干作为 anchor，身体跟踪集合为 15 个部位，包括头部和左右肩、肘、腕。六个手臂部位约占身体均值的 40%；单独的 <code>motion_arm_pos</code> 已移除，因此不能再把注释中的候选权重 1.0 算进奖励。PD、armature 和 action scale 的差异见下文计算。</p>
+<p>接触筛选也随任务变化。自由空间动作的基础适配只放行两脚触地；统一尺度的动作任务还保留了腕部中间刚体的排除项，但实际手部碰撞几何属于更末端的刚体。排除一个名字，不等于整只手都获得接触许可。后文的自碰撞传感器直接按手与腿、躯干、另一只手的刚体对取力，不能与这项全身非期望接触惩罚混为一谈。</p>
+<p><a target="_blank" rel="noopener" href="https://github.com/HybridRobotics/whole_body_tracking/blob/main/source/whole_body_tracking/whole_body_tracking/tasks/tracking/tracking_env_cfg.py">基础奖励配置与原生实现</a>。</p>
+<h2 id="4-Reference-State-Initialization-与自适应采样"><a href="#4-Reference-State-Initialization-与自适应采样" class="headerlink" title="4. Reference State Initialization 与自适应采样"></a>4. Reference State Initialization 与自适应采样</h2><p>只从动作第一帧开始训练，策略可能反复摔在前几秒，永远见不到后半段。随机参考状态初始化将动作中间的状态作为起点，使各阶段都有练习机会。</p>
+<p>自适应采样进一步按片段统计失败情况，给难段更多采样概率。其概念形式为：</p>
+<script type="math/tex; mode=display">
+p_i\propto f_i+\eta/N,</script><p>其中 <script type="math/tex">f_i</script> 是平滑后的失败统计，均匀项避免永久忽略其他片段。实际代码还会进行时间平滑与归一化。</p>
+<p>本文讨论的适配任务采用固定首帧初始化，用来观察整段动作的连续执行。回合上限随动作长度设置：基础动作任务为 18.50 s，统一尺度的长动作任务为 42.30 s，选择性自碰撞任务为 32.18 s；这些是不同参考片段的时间预算，不是控制器固有常数。它与原生方法的自适应片段采样有明确区别：前者集中暴露开头到结尾的失败链，后者提高困难片段的训练覆盖。若切回自适应采样，需要解除固定起始帧约束。</p>
+<p>但成功从中间帧跟踪几秒，不等于可以从站立连续完成整段动作。最终必须单独评估从动作开头完整执行，记录连续成功率和最早失败阶段。随机 reset 的高 reward 不能替代这个结果。</p>
+<h2 id="5-Armature-到底是什么"><a href="#5-Armature-到底是什么" class="headerlink" title="5. Armature 到底是什么"></a>5. Armature 到底是什么</h2><p>对于固定减速比 <script type="math/tex">N</script>，若电机角度满足 <script type="math/tex">\theta_m=Nq</script>，转子动能为：</p>
+<script type="math/tex; mode=display">
+E_m=\tfrac12J_m\dot\theta_m^2
+=\tfrac12(N^2J_m)\dot q^2.</script><p>因此反射到关节侧的惯量是：</p>
+<script type="math/tex; mode=display">
+J_{\mathrm{reflected}}=N^2J_m.</script><p>例如 <script type="math/tex">J_m=2\times10^{-5}\ \mathrm{kg\,m^2}</script>、<script type="math/tex">N=50</script>，得到 <script type="math/tex">0.05\ \mathrm{kg\,m^2}</script>；若减速比变为 100，得到 0.2，增加四倍而不是两倍。这是用于说明减速比平方关系的教学算例，不是电机辨识结果。</p>
+<p>MuJoCo 的 joint armature 表示附加到广义惯量的项。它不等于连杆全部惯量，也不等于摩擦或 PD 阻尼；改变它会改变加速度、接触响应和离散仿真行为。<a target="_blank" rel="noopener" href="https://mujoco.readthedocs.io/en/stable/XMLreference.html#body-joint-armature">MuJoCo armature 定义</a></p>
+<h3 id="并联踝和腰不能直接复制电机侧数值"><a href="#并联踝和腰不能直接复制电机侧数值" class="headerlink" title="并联踝和腰不能直接复制电机侧数值"></a>并联踝和腰不能直接复制电机侧数值</h3><p>若多个电机坐标满足 <script type="math/tex">\theta_m=f(q)</script>，速度映射为 <script type="math/tex">\dot\theta_m=J_m(q)\dot q</script>，则：</p>
+<script type="math/tex; mode=display">
+M_{\mathrm{reflected}}(q)=J_m(q)^T I_m J_m(q).</script><p>它可能随构型变化，并带非对角耦合。将 A／B 电机侧某个 armature 常数直接赋给串联等效 pitch／roll，是一种模型近似，而不是严格的惯量变换。</p>
+<p>本文适配案例将并联驱动侧的惯量用于串联近似模型。这样便于复用关节级仿真接口，但会忽略传动映射带来的构型依赖与耦合；只有结合传动 Jacobian 和执行器辨识，才能判断近似是否足够准确。</p>
+<h2 id="6-从二阶系统推导-PD，而不是背参数"><a href="#6-从二阶系统推导-PD，而不是背参数" class="headerlink" title="6. 从二阶系统推导 PD，而不是背参数"></a>6. 从二阶系统推导 PD，而不是背参数</h2><p>忽略耦合、接触和重力补偿误差，考虑单关节：</p>
+<script type="math/tex; mode=display">
+I\ddot q=K_p(q_d-q)-K_d\dot q.</script><p>固定目标时，误差 <script type="math/tex">e=q-q_d</script> 满足：</p>
+<script type="math/tex; mode=display">
+I\ddot e+K_d\dot e+K_pe=0.</script><p>与标准二阶系统对应：</p>
+<script type="math/tex; mode=display">
+K_p=I\omega_n^2,\qquad K_d=2\zeta I\omega_n.</script><p>G1 配置采用 <script type="math/tex">\omega_n=2\pi\times10</script> rad/s、<script type="math/tex">\zeta=2</script>，以各类 actuator armature 作为惯量尺度。其中一个 <script type="math/tex">I=0.010177520</script> 的关节组得到 <script type="math/tex">K_p\approx40.18</script>、<script type="math/tex">K_d\approx2.56</script>。<script type="math/tex">\zeta=2</script> 是过阻尼，不是临界阻尼。</p>
+<p>这是执行器参数化策略，不是关于完整多刚体系统闭环极点的保证。若真实有效惯量 <script type="math/tex">I_{\mathrm{eff}}>I_{\mathrm{armature}}</script>，用 armature 计算的频率与阻尼比都不能直接当作真实测量结果。</p>
+<h2 id="7-换一套执行器，同样的参数化规则会算出多少"><a href="#7-换一套执行器，同样的参数化规则会算出多少" class="headerlink" title="7. 换一套执行器，同样的参数化规则会算出多少"></a>7. 换一套执行器，同样的参数化规则会算出多少</h2><p>以下固定 <script type="math/tex">f_n=10</script> Hz、<script type="math/tex">\zeta=2</script>，将适配案例的 armature 数值代入。最后一列再使用 G1 风格 <script type="math/tex">s=0.25\tau_{\max}/K_p</script>。<strong>这些是公式迁移的计算值，不是建议下发的增益。</strong></p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th><span style="white-space:nowrap">关节组</span></th>
+<th style="text-align:right">配置 armature（kg·m²）</th>
+<th style="text-align:right">公式 <script type="math/tex">K_p</script>（N·m/rad）</th>
+<th style="text-align:right">公式 <script type="math/tex">K_d</script>（N·m·s/rad）</th>
+<th style="text-align:right">公式 scale（rad/action）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span style="white-space:nowrap">髋／膝</span></td>
+<td style="text-align:right">0.141250</td>
+<td style="text-align:right">557.63</td>
+<td style="text-align:right">35.50</td>
+<td style="text-align:right">0.06277</td>
+</tr>
+<tr>
+<td><span style="white-space:nowrap">踝</span></td>
+<td style="text-align:right">0.1845504</td>
+<td style="text-align:right">728.58</td>
+<td style="text-align:right">46.38</td>
+<td style="text-align:right">0.01441</td>
+</tr>
+<tr>
+<td><span style="white-space:nowrap">腰</span></td>
+<td style="text-align:right">约 0.1845504</td>
+<td style="text-align:right">728.58</td>
+<td style="text-align:right">46.38</td>
+<td style="text-align:right">0.01441</td>
+</tr>
+<tr>
+<td><span style="white-space:nowrap">肩／肘</span></td>
+<td style="text-align:right">0.088671</td>
+<td style="text-align:right">350.06</td>
+<td style="text-align:right">22.29</td>
+<td style="text-align:right">0.02999</td>
+</tr>
+<tr>
+<td><span style="white-space:nowrap">腕</span></td>
+<td style="text-align:right">0.015322</td>
+<td style="text-align:right">60.49</td>
+<td style="text-align:right">3.85</td>
+<td style="text-align:right">0.07853</td>
+</tr>
+<tr>
+<td><span style="white-space:nowrap">头</span></td>
+<td style="text-align:right">0.015322</td>
+<td style="text-align:right">60.49</td>
+<td style="text-align:right">3.85</td>
+<td style="text-align:right">0.07853</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>例如踝关节，<script type="math/tex">I=0.1845504</script>、<script type="math/tex">\tau_{\max}=42</script>，有：</p>
+<script type="math/tex; mode=display">
+K_p=0.1845504(20\pi)^2\approx728.58,\qquad
+s=\frac{0.25\times42}{728.58}\approx0.01441.</script><p>如果上肢目标需要相对 offset 改变 2 rad，scale 0.02999 对应 raw action 约 66.7；如果改成 0.5，则只需 4。高斯动作若没有硬限幅，66.7 并非数学上绝对不可达；真正的问题是它可能远离初始分布、受到正则和训练稳定性的限制。不能把“小 scale”直接说成“动作范围严格被锁死”。</p>
+<h2 id="8-参数的三层含义：公式、配置与实测响应"><a href="#8-参数的三层含义：公式、配置与实测响应" class="headerlink" title="8. 参数的三层含义：公式、配置与实测响应"></a>8. 参数的三层含义：公式、配置与实测响应</h2><p>先区分三层数字。<strong>公式值</strong>来自人为指定的 10 Hz、阻尼比 2；<strong>配置值</strong>是执行器真正接收的 Kp、Kd 和 scale；<strong>实际响应</strong>还取决于姿态相关的有效惯量、重力、耦合、接触、饱和与延迟。前两层可以直接计算，第三层需要测量。</p>
+<p>原生 G1 用同一参数化规则生成多组执行器增益。例如惯量尺度 0.010177520 对应 Kp≈40.18、Kd≈2.56。迁移到更大的 armature 后，沿用同一频率和阻尼比，会得到上一节的 557.63、728.58 等增益；并不是只更换机器人关节名字就还能得到同一组 Kp。</p>
+<h3 id="当前适配使用的-PD-数值"><a href="#当前适配使用的-PD-数值" class="headerlink" title="当前适配使用的 PD 数值"></a>当前适配使用的 PD 数值</h3><p>以下固定选择<strong>统一动作尺度方案</strong>：各关节 <code>scale=0.25 rad/action</code>。按关节扩展尺度的方案在下一节单独说明，不把两种设置拼成同一张“当前参数表”。Kp 单位为 N·m/rad，Kd 单位为 N·m·s/rad。表中频率与阻尼比仅以 armature 为标量惯量反算：</p>
+<script type="math/tex; mode=display">
+f_a=\frac{1}{2\pi}\sqrt{K_p/I_a},\qquad
+\zeta_a=\frac{K_d}{2\sqrt{K_pI_a}}.</script><div class="table-container">
+<table>
+<thead>
+<tr>
+<th>关节组</th>
+<th style="text-align:right">Kp</th>
+<th style="text-align:right">Kd</th>
+<th style="text-align:right">反算频率（Hz）</th>
+<th style="text-align:right">反算阻尼比</th>
+<th style="text-align:right">Kp × scale（N·m/action）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>髋 pitch</td>
+<td style="text-align:right">220</td>
+<td style="text-align:right">6</td>
+<td style="text-align:right">6.28</td>
+<td style="text-align:right">0.54</td>
+<td style="text-align:right">55</td>
+</tr>
+<tr>
+<td>髋 roll/yaw</td>
+<td style="text-align:right">200</td>
+<td style="text-align:right">5</td>
+<td style="text-align:right">5.99</td>
+<td style="text-align:right">0.47</td>
+<td style="text-align:right">50</td>
+</tr>
+<tr>
+<td>膝</td>
+<td style="text-align:right">240</td>
+<td style="text-align:right">6</td>
+<td style="text-align:right">6.56</td>
+<td style="text-align:right">0.52</td>
+<td style="text-align:right">60</td>
+</tr>
+<tr>
+<td>踝 pitch/roll</td>
+<td style="text-align:right">60</td>
+<td style="text-align:right">1.5</td>
+<td style="text-align:right">2.87</td>
+<td style="text-align:right">0.23</td>
+<td style="text-align:right">15</td>
+</tr>
+<tr>
+<td>腰 yaw</td>
+<td style="text-align:right">120</td>
+<td style="text-align:right">3</td>
+<td style="text-align:right">4.06</td>
+<td style="text-align:right">0.32</td>
+<td style="text-align:right">30</td>
+</tr>
+<tr>
+<td>腰 roll/pitch</td>
+<td style="text-align:right">90</td>
+<td style="text-align:right">2.5</td>
+<td style="text-align:right">3.51</td>
+<td style="text-align:right">0.31</td>
+<td style="text-align:right">22.5</td>
+</tr>
+<tr>
+<td>肩 pitch/roll</td>
+<td style="text-align:right">80</td>
+<td style="text-align:right">2.5</td>
+<td style="text-align:right">4.78</td>
+<td style="text-align:right">0.47</td>
+<td style="text-align:right">20</td>
+</tr>
+<tr>
+<td>肩 yaw／肘</td>
+<td style="text-align:right">70</td>
+<td style="text-align:right">2</td>
+<td style="text-align:right">4.47</td>
+<td style="text-align:right">0.40</td>
+<td style="text-align:right">17.5</td>
+</tr>
+<tr>
+<td>腕</td>
+<td style="text-align:right">30</td>
+<td style="text-align:right">1</td>
+<td style="text-align:right">7.04</td>
+<td style="text-align:right">0.74</td>
+<td style="text-align:right">7.5</td>
+</tr>
+<tr>
+<td>头</td>
+<td style="text-align:right">20</td>
+<td style="text-align:right">0.8</td>
+<td style="text-align:right">5.75</td>
+<td style="text-align:right">0.72</td>
+<td style="text-align:right">5</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>这些频率是简化模型的计算结果，不是带宽测试。比如腿部落地后有效惯量和外力改变，同一组 Kp、Kd 不会自动维持表中的极点。</p>
+<h3 id="踝关节的-728-58-与-60-到底差在哪里"><a href="#踝关节的-728-58-与-60-到底差在哪里" class="headerlink" title="踝关节的 728.58 与 60 到底差在哪里"></a>踝关节的 728.58 与 60 到底差在哪里</h3><p>同样使用 armature 0.1845504，公式迁移得到 <code>Kp=728.58、Kd=46.38</code>；当前配置则为 <code>Kp=60、Kd=1.5</code>。比例增益约低 12.14 倍，阻尼增益约低 30.92 倍。armature 没有随之改成另一数值。</p>
+<p>固定同一姿态、零速度和 0.1 rad 位置误差，公式组要求 72.86 N·m，超过 42 N·m 的力矩上限；配置组要求 6 N·m。在这一瞬间，前者会进入饱和。固定零位置误差、1 rad/s 的速度，阻尼项则分别要求 −46.38 与 −1.5 N·m。<strong>Kp 对位置误差起作用，Kd 对速度起作用，不能合并成一个“硬度系数”。</strong></p>
+<p>再考虑动作映射：公式组按四分之一力矩规则取 scale≈0.01441，单位动作在默认姿态附近对应 10.5 N·m；配置组 scale=0.25，对应 15 N·m。可见 Kp 降了，单位动作产生的比例力矩反而更大，因为目标角度的缩放同时改变了。</p>
+<p>还可以把力矩上限换算成一个更直观的位置误差尺度。忽略速度项和其他力矩，在静止状态下，达到比例力矩饱和的误差为：</p>
+<script type="math/tex; mode=display">
+|e_{\mathrm{sat}}|=\frac{\tau_{\max}}{K_p}.</script><p>同样是 42 N·m 上限，公式组约在 0.0576 rad（3.30°）处饱和，配置组则为 0.7 rad（40.11°）。这不是允许机器人偏差这么大的建议，而是说明高 Kp 为什么更容易把小误差变成饱和请求。实际运动中，阻尼力矩也占用力矩预算，触发饱和的误差还会随速度和方向变化。</p>
+<p>这套 BeyondMimic 适配复用了逐际速度跟踪训练中的名义 Kp/Kd，没有沿用 G1 的 10 Hz、阻尼比 2 参数化。但复用增益不代表复用了整个执行器接口：隐式／显式求解、延迟、限幅和动作零点仍有区别。</p>
+<h3 id="逐际-SDK-的行走参数是另一组"><a href="#逐际-SDK-的行走参数是另一组" class="headerlink" title="逐际 SDK 的行走参数是另一组"></a>逐际 SDK 的行走参数是另一组</h3><p>下面对照 SDK 随附的 walk 控制器与独立速度跟踪训练。SDK 一列指这里核对的版本，不代表厂商所有策略或后续版本。每格按 <strong>Kp / Kd / scale</strong> 排列，单位依次为 N·m/rad、N·m·s/rad、rad/action；训练一列的 Kp/Kd 也就是上面的 BeyondMimic 适配增益。</p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>关节组</th>
+<th style="text-align:right">SDK 行走</th>
+<th style="text-align:right">速度跟踪训练</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>髋 pitch</td>
+<td style="text-align:right">139.41 / 17.75 / 0.2511</td>
+<td style="text-align:right">220 / 6 / 0.25</td>
+</tr>
+<tr>
+<td>髋 roll/yaw</td>
+<td style="text-align:right">139.41 / 17.75 / 0.2511</td>
+<td style="text-align:right">200 / 5 / 0.25</td>
+</tr>
+<tr>
+<td>膝</td>
+<td style="text-align:right">139.41 / 17.75 / 0.2511</td>
+<td style="text-align:right">240 / 6 / 0.25</td>
+</tr>
+<tr>
+<td>踝 pitch/roll</td>
+<td style="text-align:right">93.65 / 11.92 / 0.1121</td>
+<td style="text-align:right">60 / 1.5 / 0.25</td>
+</tr>
+<tr>
+<td>腰 yaw</td>
+<td style="text-align:right">93.65 / 11.92 / 0.1121</td>
+<td style="text-align:right">120 / 3 / 0.25</td>
+</tr>
+<tr>
+<td>腰 roll/pitch</td>
+<td style="text-align:right">93.65 / 11.92 / 0.1121</td>
+<td style="text-align:right">90 / 2.5 / 0.25</td>
+</tr>
+<tr>
+<td>肩 pitch/roll</td>
+<td style="text-align:right">87.51 / 11.14 / 0.1200</td>
+<td style="text-align:right">80 / 2.5 / 0.25</td>
+</tr>
+<tr>
+<td>肩 yaw／肘</td>
+<td style="text-align:right">87.51 / 11.14 / 0.1200</td>
+<td style="text-align:right">70 / 2 / 0.25</td>
+</tr>
+<tr>
+<td>腕</td>
+<td style="text-align:right">15.12 / 1.93 / 0.3141</td>
+<td style="text-align:right">30 / 1 / 0.25</td>
+</tr>
+<tr>
+<td>头</td>
+<td style="text-align:right">15.12 / 1.93 / 0.3141</td>
+<td style="text-align:right">20 / 0.8 / 0.25</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>踝关节最能说明区别：SDK 的 Kp 更高，Kd 约为训练配置的 7.95 倍，但 scale 更小。在各自默认姿态、零速度且未饱和时，单位动作的比例力矩分别是 <code>93.65 × 0.1121 ≈ 10.50 N·m</code> 和 <code>60 × 0.25 = 15 N·m</code>。因此“SDK 的 Kp 更大”不能推出“同一个网络动作产生更大的力矩”。</p>
+<p>SDK 中踝和腰 roll/pitch 的用户力矩预算为 80 N·m，腰 yaw 为 42 N·m；速度跟踪训练中这三组均为 42 N·m。SDK 的踝 scale 虽然恰好对应约 10.5 N·m/action，却不是其 80 N·m 预算的四分之一。不能把所有参数倒推成同一个 <code>0.25 × 力矩上限 / Kp</code> 公式。</p>
+<h3 id="SDK-在目标角上限幅，Omni-在力矩上限幅"><a href="#SDK-在目标角上限幅，Omni-在力矩上限幅" class="headerlink" title="SDK 在目标角上限幅，Omni 在力矩上限幅"></a>SDK 在目标角上限幅，Omni 在力矩上限幅</h3><p>SDK 根据当前角度和速度，先算出允许的动作区间。把代码整理为单关节形式：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">budget = <span class="number">0.95</span> * user_torque_limit</span><br><span class="line">delta_min = q - q0 + (kd * dq - budget) / kp</span><br><span class="line">delta_max = q - q0 + (kd * dq + budget) / kp</span><br><span class="line">a = clip(a, delta_min / scale, delta_max / scale)</span><br><span class="line">q_des = q0 + scale * a</span><br><span class="line"><span class="comment"># 下发 q_des、目标速度 0、kp、kd；前馈力矩为 0</span></span><br></pre></td></tr></table></figure>
+<p>这个区间由 <code>−budget ≤ kp × (q_des − q) − kd × dq ≤ budget</code> 解出。关节已经偏离默认姿态或正在运动时，区间也随之变化，因此它不是固定的动作范围。它约束的是采样状态下的名义 PD 请求，不是对下一时刻真实力矩或接触力的保证。</p>
+<p>Omni 的这套交互适配则先在动作模块中计算 PD 力矩，再裁到力矩预算的 95%。例如踝的预算为 42 N·m，最终裁剪阈值为 39.9 N·m；SDK 踝关节的相应目标投影预算为 76 N·m。两处都有 0.95，实际限制仍不同。Omni 的 Isaac Sim 执行器增益设为零，是因为 PD 已在上游计算并作为力矩传入，不能据此判断“没有 PD”。</p>
+<p>Omni 还优先使用逐关节动作尺度：髋 pitch 为 0.60、膝为 0.55、肩 pitch 为 0.70、肘为 0.50、头部为 0。配置中的统一 0.25 是后备值，不会覆盖这张逐关节表。以肘为例，同样 Kp=70，速度跟踪训练的单位动作对应 17.5 N·m，Omni 对应 35 N·m；BeyondMimic 的扩展尺度方案又是另一组数值，见下一节。</p>
+<h2 id="9-Action-scale、默认姿态和限幅各管哪一段"><a href="#9-Action-scale、默认姿态和限幅各管哪一段" class="headerlink" title="9. Action scale、默认姿态和限幅各管哪一段"></a>9. Action scale、默认姿态和限幅各管哪一段</h2><p>动作先变成位置目标，再变成力矩：</p>
+<script type="math/tex; mode=display">
+q^{\mathrm{des}}=q_0+sa,\qquad
+\tau=\operatorname{clip}\left(K_p(q^{\mathrm{des}}-q)-K_d\dot q,-\tau_{\max},\tau_{\max}\right).</script><div class="table-container">
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>修改后直接改变什么</th>
+<th>不应混淆的量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>默认姿态 q₀</td>
+<td>动作零点对应的关节角</td>
+<td>参考姿态不一定就是动作零点</td>
+</tr>
+<tr>
+<td>scale</td>
+<td>一个网络动作单位对应多少 rad</td>
+<td>它不是力矩上限，也不是动作硬限幅</td>
+</tr>
+<tr>
+<td>Kp</td>
+<td>同样位置误差对应的比例力矩</td>
+<td>它不增加电机允许的最大力矩</td>
+</tr>
+<tr>
+<td>Kd</td>
+<td>同样关节速度对应的阻尼力矩</td>
+<td>它不等于减速器摩擦</td>
+</tr>
+<tr>
+<td>armature</td>
+<td>广义惯量中的附加项</td>
+<td>它不是连杆惯量的替代品，也不是用来压抖动的 Kd</td>
+</tr>
+<tr>
+<td>力矩上限</td>
+<td>截断最终命令的幅值</td>
+<td>scale 小也可能因大误差或大速度触发饱和</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3 id="0-25-与-0-6-为什么都会出现"><a href="#0-25-与-0-6-为什么都会出现" class="headerlink" title="0.25 与 0.6 为什么都会出现"></a>0.25 与 0.6 为什么都会出现</h3><p>统一尺度方案中所有关节取 0.25；按动作范围扩展的另一方案中，例如左右肘取 0.6，左肩 pitch 为 0.85，右肩 pitch 为 0.70，头部取 0。左右数值不同，反映的是这段动作各关节需要的目标范围，并不是左右电机惯量因此不同。</p>
+<p>若某关节相对默认姿态要到达 1.2 rad，scale=0.25 需要动作 4.8，scale=0.6 则需要动作 2。可用参考等效动作检查范围：</p>
+<script type="math/tex; mode=display">
+a_{\mathrm{ref},j}(t)=\frac{q_{\mathrm{ref},j}(t)-q_{0,j}}{s_j}.</script><p>扩展方案按参考幅值把等效动作控制在大约 3.2 以内。这是范围设计目标，不是策略输出被硬裁到 ±3.2，也不保证动力学能完成参考。scale=0 的关节必须单独处理：目标始终为默认角，不能用上式除以零。</p>
+<p>以肘关节 <code>Kp=70、力矩上限=42</code> 为例，在默认姿态且速度为零时，scale=0.25 对应 17.5 N·m/action，比例项在动作约 2.4 时达到上限；scale=0.6 对应 42 N·m/action，动作约 1 就到上限。扩大目标范围同时放大了动作到力矩的增益。</p>
+<p>默认角也必须成套使用。这里统一尺度方案的默认肘角为 +0.4 rad，另一动作适配方案为 −0.2 rad。相同动作 0 会相差 0.6 rad；两套网络与默认姿态互换后，即使 scale 不变，命令也已经改变。</p>
+<h3 id="软限位-0-9-与-1-0-改变的是惩罚边界"><a href="#软限位-0-9-与-1-0-改变的是惩罚边界" class="headerlink" title="软限位 0.9 与 1.0 改变的是惩罚边界"></a>软限位 0.9 与 1.0 改变的是惩罚边界</h3><p>原生 G1 和逐际速度跟踪训练的软限位系数为 0.9，本文 BeyondMimic 适配为 1.0。设硬限位为 <code>[−1, 1]</code> rad，0.9 对应软范围 <code>[−0.9, 0.9]</code>，1.0 则保留完整硬范围。参考角 0.95 rad 在前者中产生 0.05 rad 越界代价；在后者中没有软限位代价。真实硬限位并未因此消失。</p>
+<p>参考本来就接近关节极限时，缩小软范围会使跟踪奖励和限位惩罚互相冲突。是否缩小，应结合参考覆盖、机械余量和实际限位保护决定。</p>
+<h2 id="10-控制频率、隐式-PD-与显式-PD"><a href="#10-控制频率、隐式-PD-与显式-PD" class="headerlink" title="10. 控制频率、隐式 PD 与显式 PD"></a>10. 控制频率、隐式 PD 与显式 PD</h2><p>基础配置的仿真步长 0.005 s、decimation 4，策略周期为 0.02 s，即 50 Hz。策略每 20 ms 更新目标，仿真在中间继续推进。适配执行器还配置了 0–4 个物理步的随机动作延迟，对应 0–20 ms；分阶段训练的初始阶段缩为 0–2 步，即 0–10 ms。延迟步数使用物理时钟，不能乘策略周期后误写成 0–80 ms。</p>
+<p>原生 G1 使用隐式执行器，本文适配使用带延迟的显式 PD。隐式执行器由求解器内部处理驱动器与约束，显式 PD 在当前状态直接算力矩后交给物理系统积分；相同 <script type="math/tex">K_p,K_d</script> 在不同步长、求解器与饱和实现下不保证完全一致。</p>
+<p>逐际速度跟踪训练也使用隐式执行器，策略同为 50 Hz。SDK 行走控制器的默认命令循环为 1000 Hz，每 10 次循环推理一次，对应名义 100 Hz；实际频率还取决于启动配置和运行耗时。不能将这个默认值当作所有逐际策略的推理频率。</p>
+<h3 id="5-与-23-rad-s：字段不同，不能直接比较成硬限速"><a href="#5-与-23-rad-s：字段不同，不能直接比较成硬限速" class="headerlink" title="5 与 23 rad/s：字段不同，不能直接比较成硬限速"></a>5 与 23 rad/s：字段不同，不能直接比较成硬限速</h3><p>速度跟踪训练把腿部 <code>velocity_limit_sim</code> 设为 5 rad/s，踝为 13.6 rad/s，这些值交给物理求解器。BeyondMimic 适配在 <code>DelayedPDActuator</code> 中填的是 <code>velocity_limit</code>：腿部 23、踝 30 rad/s。后者是执行器模型字段，不等于 <code>velocity_limit_sim</code>。</p>
+<p>这里的延迟 PD 继承理想 PD，力矩裁剪只读取 <code>effort_limit</code>，没有使用速度—力矩曲线。因此仅填写 <code>velocity_limit=23</code>，不能证明求解器会在 23 rad/s 硬限速，也不能证明超过该速度后电机力矩会衰减。要判断最终行为，需要检查加载后的求解器速度限值与实际执行器类型；DC motor 模型的速度相关饱和是另一种实现。<a target="_blank" rel="noopener" href="https://isaac-sim.github.io/IsaacLab/v2.2.1/source/api/lab/isaaclab.actuators.html">Isaac Lab：执行器模型与限值字段</a></p>
+<p>调参时应同时记录：仿真频率、策略频率、驱动更新频率、是否有 action delay、关节目标滤波、力矩／速度限值。把仿真从 200 Hz 改为 100 Hz，而只检查 reward 配置不变，不算控制系统保持不变。</p>
+<h2 id="11-碰撞模型：几何、碰撞对和奖励是三层不同的设置"><a href="#11-碰撞模型：几何、碰撞对和奖励是三层不同的设置" class="headerlink" title="11. 碰撞模型：几何、碰撞对和奖励是三层不同的设置"></a>11. 碰撞模型：几何、碰撞对和奖励是三层不同的设置</h2><p>机器人外观正确，不等于碰撞模型正确。<code>visual</code> 决定画面，<code>collision</code> 决定接触几何，<code>inertial</code> 决定连杆质量与惯量。把足部碰撞网格换成盒体，通常是为了控制接触形状；质量和惯量是否变化，要看导入后的惯性属性是否被保留或重新计算。</p>
+<p>逐际速度跟踪训练加载的是预制 USD，配置关闭内部自碰撞；BeyondMimic 适配从 URDF 导入，另有导入后修改碰撞体和碰撞对的扩展。两者即使使用同一平台、同样的关节增益，也不能假定碰撞网格、凸近似和过滤规则相同。下面的足部盒体与 8 对白名单专指 <strong>BeyondMimic 的选择性碰撞扩展</strong>，不是逐际 SDK 或速度跟踪任务的默认模型。预制 USD 的实际碰撞体还需在场景中展开核对，不能用 URDF 的尺寸代替。</p>
+<h3 id="足部为什么要只留盒体"><a href="#足部为什么要只留盒体" class="headerlink" title="足部为什么要只留盒体"></a>足部为什么要只留盒体</h3><p>这个适配模型的每只脚原本有两个碰撞体：一个长宽高为 <strong>0.25 × 0.094 × 0.02 m</strong> 的盒体，以及一份细节网格。只增加盒体而不关闭原网格，并不能让接触只发生在盒体上。</p>
+<p>盒体中心相对足部刚体原点为 <code>(0.018, 0, −0.0535)</code> m，没有额外旋转。因此在该局部坐标系中，它覆盖：</p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>方向</th>
+<th>范围（m）</th>
+<th>对接触的影响</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>x</td>
+<td>−0.107 ～ 0.143</td>
+<td>前后支撑边界，相对原点并不对称</td>
+</tr>
+<tr>
+<td>y</td>
+<td>−0.047 ～ 0.047</td>
+<td>横向支撑宽度</td>
+</tr>
+<tr>
+<td>z</td>
+<td>−0.0635 ～ −0.0435</td>
+<td>足底平面位于局部 z = −0.0635</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>这不是世界坐标中的地面高度。需要用足部刚体位姿把盒体变换到世界系，再判断是否接地。足部无旋转时，若初始化只让“脚的刚体原点”贴住地面，实际盒体会穿进地面 6.35 cm；求解器随后执行分离修正，机器人可能在第一步就被弹起。</p>
+<p>选择性碰撞方案关闭了两脚的非盒体碰撞几何，保留可见网格。这样地面和另一只脚看到的是同一个平底盒体。代价是脚尖、脚跟曲面被简化，侧向擦碰也按盒体计算；它是否适合某段动作，需要检查实际支撑和近距离交叉姿态。</p>
+<p>网格还可能经过凸包或凸分解。单个凸包会填掉凹陷，画面中两块零件之间有缝，碰撞近似却可能已经重叠。应查看实际碰撞体叠加，不能仅凭原始 STL 的外观判断。<a target="_blank" rel="noopener" href="https://docs.isaacsim.omniverse.nvidia.com/latest/physics/simulation_fundamentals.html#convex-hull">Isaac Sim：碰撞近似</a></p>
+<h3 id="自碰撞为什么不能只看一个布尔开关"><a href="#自碰撞为什么不能只看一个布尔开关" class="headerlink" title="自碰撞为什么不能只看一个布尔开关"></a>自碰撞为什么不能只看一个布尔开关</h3><p>原生 G1 配置启用自碰撞；本文适配的基础方案关闭内部自碰撞，保留机器人与地面、外部物体的接触。选择性方案则打开总开关，再过滤具体刚体对：</p>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>内部碰撞对</th>
+<th>选择性方案</th>
+<th style="text-align:right">数量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>左脚—右脚</td>
+<td>保留</td>
+<td style="text-align:right">1</td>
+</tr>
+<tr>
+<td>每只手—左右大腿</td>
+<td>保留</td>
+<td style="text-align:right">4</td>
+</tr>
+<tr>
+<td>每只手—躯干</td>
+<td>保留</td>
+<td style="text-align:right">2</td>
+</tr>
+<tr>
+<td>左手—右手</td>
+<td>保留</td>
+<td style="text-align:right">1</td>
+</tr>
+<tr>
+<td>其余内部刚体对</td>
+<td>过滤</td>
+<td style="text-align:right">不参与这套内部碰撞计算</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>这是 <strong>8 对白名单</strong>，不是所有非相邻刚体都开启碰撞。手肘—躯干等未列出的组合，不能声称已受到物理自碰撞保护。地面和外部物体不在这份内部过滤名单里。</p>
+<p>这样做的原因是，相邻关节附近的完整网格可能在合法姿态下重叠。直接全部开启，会让求解器试图分离本来应装配在一起的部件；全部关闭，又会放过双脚交叉穿透或手穿入躯干。白名单保留这段动作关心的组合，同时避开尚未整理好的其余碰撞体。更完整的模型仍需逐对清理几何与过滤规则。</p>
+<p>对应的实现逻辑是：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 碰撞配置的逻辑示意；几何和过滤作用于导入后的资产</span></span><br><span class="line"><span class="keyword">for</span> foot <span class="keyword">in</span> (left_foot, right_foot):</span><br><span class="line">    disable_non_box_colliders(foot)  <span class="comment"># 只关碰撞，不隐藏 visual</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">for</span> body_a, body_b <span class="keyword">in</span> internal_body_pairs:</span><br><span class="line">    <span class="keyword">if</span> unordered_pair(body_a, body_b) <span class="keyword">not</span> <span class="keyword">in</span> allowed_pairs:</span><br><span class="line">        filter_collision(body_a, body_b)</span><br><span class="line"><span class="comment"># 不把地面或外部物体加入这份内部过滤</span></span><br></pre></td></tr></table></figure>
+<p>关掉 <code>debug_vis</code> 只是不画调试标记；关闭某个碰撞体才会改变接触物理；从奖励名单移除某个刚体则只改变学习目标。三个操作不能相互替代。</p>
+<h3 id="接触参数的数值分别控制什么"><a href="#接触参数的数值分别控制什么" class="headerlink" title="接触参数的数值分别控制什么"></a>接触参数的数值分别控制什么</h3><div class="table-container">
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>本文设置／含义</th>
+<th>调大后主要影响</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>物理步长</td>
+<td>0.005 s</td>
+<td>步长更大时，同一速度每步走得更远，薄几何更容易漏检</td>
+</tr>
+<tr>
+<td>位置／速度求解迭代</td>
+<td>8 / 4</td>
+<td>每个物理步中分配更多约束求解工作；不是把仿真频率变成 8 倍</td>
+</tr>
+<tr>
+<td>最大分离修正速度</td>
+<td>1 m/s</td>
+<td>允许更快消除已有穿透，但也可能出现更突然的分离运动</td>
+</tr>
+<tr>
+<td>contact offset</td>
+<td>接触开始生成的距离范围</td>
+<td>更早建立接触约束，同时可能增加接触对和计算量</td>
+</tr>
+<tr>
+<td>rest offset</td>
+<td>静止接触的间隙约定</td>
+<td>改变两形状停下时的几何间距</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>本例没有在机器人配置中显式覆盖后两项，不能把“未填写”写成“实际为零”。应查看导入资产上的最终属性。二者的长度单位是 m，与下面奖励中的 1 N、2 N 阈值没有换算关系。<a target="_blank" rel="noopener" href="https://github.com/isaac-sim/IsaacLab/blob/v2.2.1/source/isaaclab/isaaclab/sim/schemas/schemas_cfg.py">Isaac Lab：碰撞属性定义</a></p>
+<p>还要把摩擦与接触几何分开。基础任务给机器人材质采样静摩擦 0.3–1.6、动摩擦 0.3–1.2、恢复系数 0–0.5；分阶段训练的初始阶段改为 0.6–1.3、0.5–1.1、0–0.1，后续阶段扩为 0.4–1.4、0.35–1.1、0–0.1。这些是材质随机化范围，并非某个训练完成后测出的常数，也不是奖励权重。</p>
+<p>实际接触系数还取决于地面材质和 combine mode。地面的摩擦系数设为 1，组合模式为 multiply；若接触对最终采用乘法，机器人一侧的 0.6 与地面的 1 组合后仍为 0.6。缩小恢复系数范围是减少弹跳的不确定性，不能修复初始几何已经穿透的问题。</p>
+<h3 id="接触惩罚：1-N、2-N、50-N、80-N-并不是一类阈值"><a href="#接触惩罚：1-N、2-N、50-N、80-N-并不是一类阈值" class="headerlink" title="接触惩罚：1 N、2 N、50 N、80 N 并不是一类阈值"></a>接触惩罚：1 N、2 N、50 N、80 N 并不是一类阈值</h3><p>基础 <code>undesired_contacts</code> 在选定身体的净法向接触力超过 1 N 后计数，不区分 10 N 与 100 N。选择性方案另加五项，用按碰撞对象筛选的力矩阵区分“脚踩地”和“脚撞脚”，并加入手靠近大腿的预警。</p>
+<div class="table-container">
+<div class="reward-table-wrap" tabindex="0" role="region" aria-label="奖励与代价参数表，可横向滚动"><table class="reward-table">
+<thead>
+<tr>
+<th>新增项</th>
+<th style="text-align:right">权重</th>
+<th>阈值与尺度</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#reward-bm-collision-foot"><code>foot_pair_contact</code></a></td>
+<td style="text-align:right">−0.05</td>
+<td>起罚 2 N；50 N 达到上限</td>
+<td>左右脚互撞，排除足地接触</td>
+</tr>
+<tr>
+<td><a href="#reward-bm-collision-left-hand"><code>left_hand_self_contact</code></a></td>
+<td style="text-align:right">−0.1</td>
+<td>起罚 2 N；80 N 达到上限</td>
+<td>左手与两腿、躯干、右手</td>
+</tr>
+<tr>
+<td><a href="#reward-bm-collision-right-hand"><code>right_hand_self_contact</code></a></td>
+<td style="text-align:right">−0.1</td>
+<td>起罚 2 N；80 N 达到上限</td>
+<td>右手与两腿、躯干</td>
+</tr>
+<tr>
+<td><a href="#reward-bm-collision-left-proximity"><code>left_hand_thigh_proximity</code></a></td>
+<td style="text-align:right">−0.1</td>
+<td>距离 0.25 m；过渡宽度 0.04 m</td>
+<td>左手靠近大腿轴线时提前惩罚</td>
+</tr>
+<tr>
+<td><a href="#reward-bm-collision-right-proximity"><code>right_hand_thigh_proximity</code></a></td>
+<td style="text-align:right">−0.1</td>
+<td>距离 0.25 m；过渡宽度 0.04 m</td>
+<td>右手靠近大腿轴线时提前惩罚</td>
+</tr>
+</tbody>
+</table></div>
+</div>
+<p>这里的 <code>force_matrix_w</code> 和 <code>net_forces_w</code> 按所用接口表示法向接触力，不包含完整的切向摩擦力。因此下面的力阈值也不能当作总接触载荷限制。<a target="_blank" rel="noopener" href="https://isaac-sim.github.io/IsaacLab/v2.2.0/source/api/lab/isaaclab.sensors.html#isaaclab.sensors.ContactSensorData">Isaac Lab：接触传感器数据</a></p>
+<p>表中各项先产生 <code>[0,1]</code> 的代价，再乘负权重与 0.02 s。<strong>50 N／80 N 只表示惩罚饱和，不会把真实接触力限制在该值。</strong> 42 N·m 则是某组关节的力矩限值，单位和作用位置都不同。</p>
+<details class="reward-detail" id="reward-bm-collision-foot"><summary>foot_pair_contact</summary><div class="reward-detail-body"><p>传感器只看左脚与右脚的接触。取筛选力矩阵的力向量范数，在对应身体与对象维度取最大值，记为 F，代价为：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">force = force_matrix.norm(dim=-<span class="number">1</span>).amax(dim=(<span class="number">1</span>, <span class="number">2</span>))</span><br><span class="line">cost = ((force - <span class="number">2.0</span>) / (<span class="number">50.0</span> - <span class="number">2.0</span>)).clamp(<span class="number">0.0</span>, <span class="number">1.0</span>)</span><br></pre></td></tr></table></figure>
+<p>F≤2 N 时为零；F=26 N 时为 0.5；F≥50 N 时为 1。26 N 对应的单步贡献为 <code>−0.05 × 0.5 × 0.02 = −0.0005</code>。地面不在筛选对象中，正常支撑力不会进入这项。</p>
+</div></details>
+<details class="reward-detail" id="reward-bm-collision-left-hand"><summary>left_hand_self_contact</summary><div class="reward-detail-body"><p>左手传感器筛选两侧大腿、躯干和右手；用这些接触对象中的最大力范数计算 <code>clamp((F−2)/78, 0, 1)</code>，而不是把所有力先求和。F=41 N 时代价为 0.5，单步贡献 <code>−0.1 × 0.5 × 0.02 = −0.001</code>。多处同时接触也不使这一项超过 1。</p>
+</div></details>
+<details class="reward-detail" id="reward-bm-collision-right-hand"><summary>right_hand_self_contact</summary><div class="reward-detail-body"><p>右手传感器筛选两侧大腿和躯干，阈值、饱和与权重同左手。右手列表不再包含左手，使手—手接触只通过左手那一项计入。物理碰撞对是无向的，奖励统计可以选择只从一个传感器方向读取。</p>
+</div></details>
+<details class="reward-detail" id="reward-bm-collision-left-proximity"><summary>left_hand_thigh_proximity</summary><div class="reward-detail-body"><p>以手部刚体原点为点，以髋部到膝部的连线为线段，计算点到两侧线段的最小距离 d：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">segment = end - start</span><br><span class="line">u = ((point - start) * segment).<span class="built_in">sum</span>(-<span class="number">1</span>) / segment.square().<span class="built_in">sum</span>(-<span class="number">1</span>).clamp_min(<span class="number">1e-9</span>)</span><br><span class="line">closest = start + u.clamp(<span class="number">0</span>, <span class="number">1</span>)[..., <span class="literal">None</span>] * segment</span><br><span class="line">distance = (point - closest).norm(dim=-<span class="number">1</span>).amin(dim=<span class="number">1</span>)</span><br><span class="line">cost = ((<span class="number">0.25</span> - distance) / <span class="number">0.04</span>).clamp(<span class="number">0</span>, <span class="number">1</span>)</span><br></pre></td></tr></table></figure>
+<p>d≥0.25 m 时为零，d=0.23 m 时为 0.5，d≤0.21 m 时为 1。0.04 m 是线性过渡宽度，不是指数核的标准差。<strong>d 是原点到轴线的距离，既不是网格表面间距，也不等于手与腿的真实安全余量。</strong> 这项提供便宜的几何预警，实际碰撞仍由碰撞体与求解器处理。</p>
+</div></details>
+<details class="reward-detail" id="reward-bm-collision-right-proximity"><summary>right_hand_thigh_proximity</summary><div class="reward-detail-body"><p>与左手使用同一个点到线段公式，只将点换成右手刚体原点；仍对两侧大腿取最小距离。权重 −0.1、阈值 0.25 m、过渡宽度 0.04 m。F、距离预警和身体跟踪误差是不同信号：没有碰撞力时也可能触发预警，有碰撞力时也不能由这个代理距离反推出网格穿透深度。</p>
+</div></details>
+<h3 id="先检查碰撞，再解释训练曲线"><a href="#先检查碰撞，再解释训练曲线" class="headerlink" title="先检查碰撞，再解释训练曲线"></a>先检查碰撞，再解释训练曲线</h3><p>在 reset 后、第一次策略动作之前，先显示碰撞体与接触法线，检查足底高度、相邻部件穿透和异常接触。然后分别检查双脚交叉、手贴近躯干、手靠近大腿的姿态，确认名单里的接触会产生力，名单外的接触确实被过滤。</p>
+<p>最后用同一策略、同一参考和同一随机种子比较“基础碰撞”和“选择性碰撞”。记录脚滑、身体接触力、力矩饱和与失败时刻，再判断变化来自几何、求解还是奖励。接触穿透造成的瞬时抖动，不能仅凭动作曲线就归因于 Kp 太大。</p>
+<h2 id="12-如何验证参数，而不是靠动画判断"><a href="#12-如何验证参数，而不是靠动画判断" class="headerlink" title="12. 如何验证参数，而不是靠动画判断"></a>12. 如何验证参数，而不是靠动画判断</h2><p>从单关节或小幅多关节阶跃开始，记录目标、实际角度、速度和力矩。分别改变目标幅值和初始姿态，判断是否出现饱和、延迟、耦合与接触影响。若要拟合二阶模型，应选未饱和、无显著碰撞的片段，并报告拟合残差。</p>
+<p>进入整段动作后至少观察：跟踪位置误差、足滑、动作变化、饱和占比和跌倒时间。一个参数组如果把训练动作拟合得很好，却需要长期饱和，通常不是理想的迁移起点。</p>
+<p>本文给出参数计算与模型差异分析，尚未报告这两组参数的实机阶跃响应或统一条件下的跟踪对照结果。</p>
+<h2 id="13-从训练到部署，必须保留哪些约定"><a href="#13-从训练到部署，必须保留哪些约定" class="headerlink" title="13. 从训练到部署，必须保留哪些约定"></a>13. 从训练到部署，必须保留哪些约定</h2><p>导出网络之前，先把以下内容当作一个整体冻结：关节名字和顺序、轴与零位、默认姿态、观测归一化、四元数顺序、action offset 与 scale、PD、周期和终止逻辑。</p>
+<p>同一帧离线数据，训练环境与部署代码应生成数值一致的观测；同一个策略输出，应生成一致的关节目标。先用确定输入做逐级比对，再做物理回放。否则看似“sim-to-real gap”的问题，可能根本没有到物理层。</p>
+<p>逐际的两个行走接口已经能给出具体反例：SDK 行走网络输入为 <code>102 × 5 = 510</code> 维，按完整帧堆叠，最新帧在前；独立速度跟踪策略为 <code>104 × 5 = 520</code> 维，多了二维步态相位，并按观测项分别堆叠五帧，每项内部从旧到新。SDK 的角速度缩放为 0.25，训练接口为 0.2。SDK 配置虽然保留步态频率字段，实际观测拼接没有启用步态项；应以送入网络的张量为准。</p>
+<p>动作零点同样不同：SDK 的髋 pitch／膝／踝 pitch 默认角为 −0.15／0.30／−0.16 rad，速度跟踪训练为 −0.25／0.55／−0.30 rad。关节数组顺序也需按名称重排，不能因为都是 31 个动作就直接对接。只替换网络文件，输入维度、历史顺序、归一化和动作解释都可能同时出错。</p>
+<h2 id="参考与参数边界"><a href="#参考与参数边界" class="headerlink" title="参考与参数边界"></a>参考与参数边界</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://beyondmimic.github.io/">BeyondMimic</a>、<a target="_blank" rel="noopener" href="https://github.com/HybridRobotics/whole_body_tracking">公开代码</a>：跟踪框架及 G1 参数化。</li>
+<li><a target="_blank" rel="noopener" href="https://mujoco.readthedocs.io/en/stable/modeling.html">MuJoCo 建模文档</a>、<a target="_blank" rel="noopener" href="https://mujoco.readthedocs.io/en/stable/XMLreference.html#body-joint-armature">armature 定义</a>。</li>
+<li>本文数值对应上述执行器适配案例；并联到串联的惯量处理属于模型近似。计算表说明数值关系，不宣称已完成真实执行器辨识或证明某组参数最优。</li>
+</ul>
+<link rel="stylesheet" href="/css/control-series.css"><script src="/js/control-series.js" defer></script></article><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta"><i class="fas fa-circle-user fa-fw"></i>文章作者: </span><span class="post-copyright-info"><a href="https://cherishxi.xyz">Xi Zeng</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta"><i class="fas fa-square-arrow-up-right fa-fw"></i>文章链接: </span><span class="post-copyright-info"><a href="https://cherishxi.xyz/2026/06/17/beyondmimic-control-foundations/">https://cherishxi.xyz/2026/06/17/beyondmimic-control-foundations/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta"><i class="fas fa-circle-exclamation fa-fw"></i>版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来源 <a href="https://cherishxi.xyz" target="_blank">Xi Zeng's Blog</a>！</span></div></div><div class="tag_share"><div class="post-meta__tag-list"><a class="post-meta__tags" href="/tags/BeyondMimic/">BeyondMimic</a><a class="post-meta__tags" href="/tags/%E5%85%A8%E8%BA%AB%E6%8E%A7%E5%88%B6/">全身控制</a><a class="post-meta__tags" href="/tags/PD%E6%8E%A7%E5%88%B6/">PD控制</a><a class="post-meta__tags" href="/tags/%E4%BB%BF%E7%9C%9F/">仿真</a></div><div class="post-share"><div class="social-share" data-image="/img/photo.JPG" data-sites="facebook,x,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/css/share.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/js/social-share.min.js" defer></script></div></div><nav class="pagination-post" id="pagination"><a class="pagination-related" href="/2026/07/24/retargeting-gmr-pyroki-omni/" title="人体动作重定向原理与实现：GMR、PyRoKi 与 OmniRetarget"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info"><div class="info-1"><div class="info-item-1">上一篇</div><div class="info-item-2">人体动作重定向原理与实现：GMR、PyRoKi 与 OmniRetarget</div></div><div class="info-2"><div class="info-item-1">从 FK、Jacobian 和残差线性化出发，推导速度级 IK、Gauss–Newton、LM 与约束优化，对照 GMR、PyRoKi 轨迹建模和 OmniRetarget 的交互保持机制，解释代价权重、时间尺度与几何可行性的边界。</div></div></div></a><a class="pagination-related" href="/2026/05/29/trpo-ppo-sac-robot-control/" title="机器人强化学习中的 PPO：从价值估计到策略更新"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-right"><div class="info-1"><div class="info-item-1">下一篇</div><div class="info-item-2">机器人强化学习中的 PPO：从价值估计到策略更新</div></div><div class="info-2"><div class="info-item-1">从回报与 Bellman 方程推导 TD 误差、优势函数和 GAE，解释 PPO 为什么更新策略参数、怎样限制更新，以及它在并行机器人训练中的优势与局限，并与 TRPO、SAC 对照。</div></div></div></a></nav><div class="relatedPosts"><div class="headline"><i class="fas fa-thumbs-up fa-fw"></i><span>相关推荐</span></div><div class="relatedPosts-list"><a class="pagination-related" href="/2026/10/08/whole-body-controllers-why-protomotions/" title="人形机器人全身控制器对比：为什么选择 ProtoMotions"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-08</div><div class="info-item-2">人形机器人全身控制器对比：为什么选择 ProtoMotions</div></div><div class="info-2"><div class="info-item-1">沿动作参考、统一运动表示和任务提示三条路线，拆解 BeyondMimic、ProtoMotions、TWIST2、SONIC 与 BFM-Zero 的条件接口、优化目标和迁移成本，说明选择 ProtoMotions 继续研究全身控制与柔顺交互的技术依据。</div></div></div></a><a class="pagination-related" href="/2026/08/13/protomotions-oli-controller/" title="基于 ProtoMotions 的全身控制器训练与部署"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-08-13</div><div class="info-item-2">基于 ProtoMotions 的全身控制器训练与部署</div></div><div class="info-2"><div class="info-item-1">围绕一套 31 自由度全身跟踪控制器，拆解动作重采样、前瞻参考、非对称观测、PPO 奖励与 L2C2 正则，计算动作到力矩的增益，并检查策略导出和部署接口的一致性。</div></div></div></a></div></div></div><div class="aside-content" id="aside-content"><div class="card-widget card-info text-center"><div class="avatar-img"><img src="/img/photo.JPG" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="author-info-name">Xi Zeng</div><div class="author-info-description"></div><div class="site-data"><a href="/archives/"><div class="headline">文章</div><div class="length-num">14</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">32</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">14</div></a></div><a id="card-info-btn" target="_blank" rel="noopener" href="https://github.com/Cherishings"><i class="fab fa-github"></i><span>Follow Me</span></a><div class="card-info-social-icons"><a class="social-icon" href="https://github.com/Cherishings" target="_blank" title="Github"><i class="fab fa-github" style="color: #24292e;"></i></a><a class="social-icon" href="mailto:504132714@qq.com" target="_blank" title="Email"><i class="fas fa-envelope" style="color: #4a7dbe;"></i></a></div></div><div class="card-widget card-announcement"><div class="item-headline"><i class="fas fa-bullhorn fa-shake"></i><span>公告</span></div><div class="announcement_content">纸质与电子档笔记持续整理中，更多分享即将出炉</div></div><div class="sticky_layout"><div class="card-widget" id="card-toc"><div class="item-headline"><i class="fas fa-stream"></i><span>目录</span><span class="toc-percentage"></span></div><div class="toc-content"><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#1-%E8%B7%9F%E8%B8%AA%E7%AD%96%E7%95%A5%E5%AD%A6%E5%88%B0%E7%9A%84%E6%98%AF%E5%8F%8D%E9%A6%88%EF%BC%8C%E8%80%8C%E4%B8%8D%E6%98%AF%E5%8A%A8%E4%BD%9C%E6%92%AD%E6%94%BE%E5%99%A8"><span class="toc-text">1. 跟踪策略学到的是反馈，而不是动作播放器</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#2-%E5%8F%82%E8%80%83%E4%B8%8E%E8%A7%82%E6%B5%8B%E5%BF%85%E9%A1%BB%E4%BD%BF%E7%94%A8%E4%B8%80%E8%87%B4%E7%9A%84%E5%9D%90%E6%A0%87%E7%BA%A6%E5%AE%9A"><span class="toc-text">2. 参考与观测必须使用一致的坐标约定</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#3-%E5%A5%96%E5%8A%B1%E4%B8%AD%E7%9A%84%E5%B0%BA%E5%BA%A6%E5%86%B3%E5%AE%9A%E7%AD%96%E7%95%A5%E6%84%BF%E6%84%8F%E7%89%BA%E7%89%B2%E4%BB%80%E4%B9%88"><span class="toc-text">3. 奖励中的尺度决定策略愿意牺牲什么</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%9D%83%E9%87%8D-0-5-%E5%92%8C-std-0-3%EF%BC%8C%E6%94%B9%E7%9A%84%E6%98%AF%E4%B8%A4%E4%BB%B6%E4%BA%8B"><span class="toc-text">权重 0.5 和 std 0.3，改的是两件事</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9F%BA%E7%A1%80%E8%B7%9F%E8%B8%AA%E4%BB%BB%E5%8A%A1%E7%9A%84%E4%B9%9D%E9%A1%B9%E5%A5%96%E5%8A%B1"><span class="toc-text">基础跟踪任务的九项奖励</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%80%90%E9%A1%B9%E5%AE%9E%E7%8E%B0"><span class="toc-text">逐项实现</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%BB%A7%E6%89%BF%E4%BA%86%E7%B3%BB%E6%95%B0%EF%BC%8C%E4%BB%BB%E5%8A%A1%E5%8D%B4%E4%B8%8D%E5%AE%8C%E5%85%A8%E7%9B%B8%E5%90%8C"><span class="toc-text">继承了系数，任务却不完全相同</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#4-Reference-State-Initialization-%E4%B8%8E%E8%87%AA%E9%80%82%E5%BA%94%E9%87%87%E6%A0%B7"><span class="toc-text">4. Reference State Initialization 与自适应采样</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#5-Armature-%E5%88%B0%E5%BA%95%E6%98%AF%E4%BB%80%E4%B9%88"><span class="toc-text">5. Armature 到底是什么</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%B9%B6%E8%81%94%E8%B8%9D%E5%92%8C%E8%85%B0%E4%B8%8D%E8%83%BD%E7%9B%B4%E6%8E%A5%E5%A4%8D%E5%88%B6%E7%94%B5%E6%9C%BA%E4%BE%A7%E6%95%B0%E5%80%BC"><span class="toc-text">并联踝和腰不能直接复制电机侧数值</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#6-%E4%BB%8E%E4%BA%8C%E9%98%B6%E7%B3%BB%E7%BB%9F%E6%8E%A8%E5%AF%BC-PD%EF%BC%8C%E8%80%8C%E4%B8%8D%E6%98%AF%E8%83%8C%E5%8F%82%E6%95%B0"><span class="toc-text">6. 从二阶系统推导 PD，而不是背参数</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#7-%E6%8D%A2%E4%B8%80%E5%A5%97%E6%89%A7%E8%A1%8C%E5%99%A8%EF%BC%8C%E5%90%8C%E6%A0%B7%E7%9A%84%E5%8F%82%E6%95%B0%E5%8C%96%E8%A7%84%E5%88%99%E4%BC%9A%E7%AE%97%E5%87%BA%E5%A4%9A%E5%B0%91"><span class="toc-text">7. 换一套执行器，同样的参数化规则会算出多少</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#8-%E5%8F%82%E6%95%B0%E7%9A%84%E4%B8%89%E5%B1%82%E5%90%AB%E4%B9%89%EF%BC%9A%E5%85%AC%E5%BC%8F%E3%80%81%E9%85%8D%E7%BD%AE%E4%B8%8E%E5%AE%9E%E6%B5%8B%E5%93%8D%E5%BA%94"><span class="toc-text">8. 参数的三层含义：公式、配置与实测响应</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%BD%93%E5%89%8D%E9%80%82%E9%85%8D%E4%BD%BF%E7%94%A8%E7%9A%84-PD-%E6%95%B0%E5%80%BC"><span class="toc-text">当前适配使用的 PD 数值</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E8%B8%9D%E5%85%B3%E8%8A%82%E7%9A%84-728-58-%E4%B8%8E-60-%E5%88%B0%E5%BA%95%E5%B7%AE%E5%9C%A8%E5%93%AA%E9%87%8C"><span class="toc-text">踝关节的 728.58 与 60 到底差在哪里</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%80%90%E9%99%85-SDK-%E7%9A%84%E8%A1%8C%E8%B5%B0%E5%8F%82%E6%95%B0%E6%98%AF%E5%8F%A6%E4%B8%80%E7%BB%84"><span class="toc-text">逐际 SDK 的行走参数是另一组</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#SDK-%E5%9C%A8%E7%9B%AE%E6%A0%87%E8%A7%92%E4%B8%8A%E9%99%90%E5%B9%85%EF%BC%8COmni-%E5%9C%A8%E5%8A%9B%E7%9F%A9%E4%B8%8A%E9%99%90%E5%B9%85"><span class="toc-text">SDK 在目标角上限幅，Omni 在力矩上限幅</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#9-Action-scale%E3%80%81%E9%BB%98%E8%AE%A4%E5%A7%BF%E6%80%81%E5%92%8C%E9%99%90%E5%B9%85%E5%90%84%E7%AE%A1%E5%93%AA%E4%B8%80%E6%AE%B5"><span class="toc-text">9. Action scale、默认姿态和限幅各管哪一段</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#0-25-%E4%B8%8E-0-6-%E4%B8%BA%E4%BB%80%E4%B9%88%E9%83%BD%E4%BC%9A%E5%87%BA%E7%8E%B0"><span class="toc-text">0.25 与 0.6 为什么都会出现</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E8%BD%AF%E9%99%90%E4%BD%8D-0-9-%E4%B8%8E-1-0-%E6%94%B9%E5%8F%98%E7%9A%84%E6%98%AF%E6%83%A9%E7%BD%9A%E8%BE%B9%E7%95%8C"><span class="toc-text">软限位 0.9 与 1.0 改变的是惩罚边界</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#10-%E6%8E%A7%E5%88%B6%E9%A2%91%E7%8E%87%E3%80%81%E9%9A%90%E5%BC%8F-PD-%E4%B8%8E%E6%98%BE%E5%BC%8F-PD"><span class="toc-text">10. 控制频率、隐式 PD 与显式 PD</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#5-%E4%B8%8E-23-rad-s%EF%BC%9A%E5%AD%97%E6%AE%B5%E4%B8%8D%E5%90%8C%EF%BC%8C%E4%B8%8D%E8%83%BD%E7%9B%B4%E6%8E%A5%E6%AF%94%E8%BE%83%E6%88%90%E7%A1%AC%E9%99%90%E9%80%9F"><span class="toc-text">5 与 23 rad&#x2F;s：字段不同，不能直接比较成硬限速</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#11-%E7%A2%B0%E6%92%9E%E6%A8%A1%E5%9E%8B%EF%BC%9A%E5%87%A0%E4%BD%95%E3%80%81%E7%A2%B0%E6%92%9E%E5%AF%B9%E5%92%8C%E5%A5%96%E5%8A%B1%E6%98%AF%E4%B8%89%E5%B1%82%E4%B8%8D%E5%90%8C%E7%9A%84%E8%AE%BE%E7%BD%AE"><span class="toc-text">11. 碰撞模型：几何、碰撞对和奖励是三层不同的设置</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E8%B6%B3%E9%83%A8%E4%B8%BA%E4%BB%80%E4%B9%88%E8%A6%81%E5%8F%AA%E7%95%99%E7%9B%92%E4%BD%93"><span class="toc-text">足部为什么要只留盒体</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E8%87%AA%E7%A2%B0%E6%92%9E%E4%B8%BA%E4%BB%80%E4%B9%88%E4%B8%8D%E8%83%BD%E5%8F%AA%E7%9C%8B%E4%B8%80%E4%B8%AA%E5%B8%83%E5%B0%94%E5%BC%80%E5%85%B3"><span class="toc-text">自碰撞为什么不能只看一个布尔开关</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%8E%A5%E8%A7%A6%E5%8F%82%E6%95%B0%E7%9A%84%E6%95%B0%E5%80%BC%E5%88%86%E5%88%AB%E6%8E%A7%E5%88%B6%E4%BB%80%E4%B9%88"><span class="toc-text">接触参数的数值分别控制什么</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%8E%A5%E8%A7%A6%E6%83%A9%E7%BD%9A%EF%BC%9A1-N%E3%80%812-N%E3%80%8150-N%E3%80%8180-N-%E5%B9%B6%E4%B8%8D%E6%98%AF%E4%B8%80%E7%B1%BB%E9%98%88%E5%80%BC"><span class="toc-text">接触惩罚：1 N、2 N、50 N、80 N 并不是一类阈值</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%85%88%E6%A3%80%E6%9F%A5%E7%A2%B0%E6%92%9E%EF%BC%8C%E5%86%8D%E8%A7%A3%E9%87%8A%E8%AE%AD%E7%BB%83%E6%9B%B2%E7%BA%BF"><span class="toc-text">先检查碰撞，再解释训练曲线</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#12-%E5%A6%82%E4%BD%95%E9%AA%8C%E8%AF%81%E5%8F%82%E6%95%B0%EF%BC%8C%E8%80%8C%E4%B8%8D%E6%98%AF%E9%9D%A0%E5%8A%A8%E7%94%BB%E5%88%A4%E6%96%AD"><span class="toc-text">12. 如何验证参数，而不是靠动画判断</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#13-%E4%BB%8E%E8%AE%AD%E7%BB%83%E5%88%B0%E9%83%A8%E7%BD%B2%EF%BC%8C%E5%BF%85%E9%A1%BB%E4%BF%9D%E7%95%99%E5%93%AA%E4%BA%9B%E7%BA%A6%E5%AE%9A"><span class="toc-text">13. 从训练到部署，必须保留哪些约定</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E4%B8%8E%E5%8F%82%E6%95%B0%E8%BE%B9%E7%95%8C"><span class="toc-text">参考与参数边界</span></a></li></ol></div></div><div class="card-widget card-recent-post"><div class="item-headline"><i class="fas fa-history"></i><span>最新文章</span></div><div class="aside-list"><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/10/08/whole-body-controllers-why-protomotions/" title="人形机器人全身控制器对比：为什么选择 ProtoMotions">人形机器人全身控制器对比：为什么选择 ProtoMotions</a><time datetime="2026-10-08T15:14:09.000Z" title="发表于 2026-10-08 23:14:09">2026-10-08</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/09/06/compliance-gentle-omni-falcon/" title="从动作跟踪到柔顺交互：参考动力学与接触控制">从动作跟踪到柔顺交互：参考动力学与接触控制</a><time datetime="2026-09-06T08:53:41.000Z" title="发表于 2026-09-06 16:53:41">2026-09-06</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/08/13/protomotions-oli-controller/" title="基于 ProtoMotions 的全身控制器训练与部署">基于 ProtoMotions 的全身控制器训练与部署</a><time datetime="2026-08-13T13:07:26.000Z" title="发表于 2026-08-13 21:07:26">2026-08-13</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/07/24/retargeting-gmr-pyroki-omni/" title="人体动作重定向原理与实现：GMR、PyRoKi 与 OmniRetarget">人体动作重定向原理与实现：GMR、PyRoKi 与 OmniRetarget</a><time datetime="2026-07-23T16:32:57.000Z" title="发表于 2026-07-24 00:32:57">2026-07-24</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/06/17/beyondmimic-control-foundations/" title="BeyondMimic 全身动作跟踪原理与机器人适配">BeyondMimic 全身动作跟踪原理与机器人适配</a><time datetime="2026-06-17T11:46:12.000Z" title="发表于 2026-06-17 19:46:12">2026-06-17</time></div></div></div></div></div></div></main><footer id="footer"><div class="footer-other"><div class="footer-copyright"><span class="copyright">&copy;&nbsp;2026 By Xi Zeng</span></div><div class="footer_custom_text">在这一隅角落，获得知识与灵魂的心安之所<br>Find in this little corner a place of peace for knowledge and the soul.</div></div></footer></div><div id="rightside"><div id="rightside-config-hide"><button id="readmode" type="button" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="translateLink" type="button" title="简繁转换">繁</button><button id="darkmode" type="button" title="日间和夜间模式切换"><i class="fas fa-adjust"></i></button><button id="hide-aside-btn" type="button" title="单栏和双栏切换"><i class="fas fa-arrows-alt-h"></i></button></div><div id="rightside-config-show"><button id="rightside-config" type="button" title="设置"><i class="fas fa-cog fa-spin"></i></button><button class="close" id="mobile-toc-button" type="button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" type="button" title="回到顶部"><span class="scroll-percent"></span><i class="fas fa-arrow-up"></i></button></div></div><div><script src="/js/utils.js?v=5.5.4"></script><script src="/js/main.js?v=5.5.4"></script><script src="/js/tw_cn.js?v=5.5.4"></script><div class="js-pjax"><script>(() => {
+  const loadMathjax = () => {
+    if (!window.MathJax) {
+      window.MathJax = {
+        loader: {
+          load: [
+            // Four font extension packages (optional)
+            //- '[tex]/bbm',
+            //- '[tex]/bboldx',
+            //- '[tex]/dsfont',
+            '[tex]/mhchem'
+          ],
+          paths: {
+            'mathjax-newcm': '[mathjax]/../@mathjax/mathjax-newcm-font',
+
+            //- // Four font extension packages (optional)
+            //- 'mathjax-bbm-extension': '[mathjax]/../@mathjax/mathjax-bbm-font-extension',
+            //- 'mathjax-bboldx-extension': '[mathjax]/../@mathjax/mathjax-bboldx-font-extension',
+            //- 'mathjax-dsfont-extension': '[mathjax]/../@mathjax/mathjax-dsfont-font-extension',
+            'mathjax-mhchem-extension': '[mathjax]/../@mathjax/mathjax-mhchem-font-extension'
+          }
+        },
+        output: {
+          font: 'mathjax-newcm',
+        },
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          tags: 'none',
+          packages: {
+            '[+]': [
+              'mhchem'
+            ]
+          }
+        },
+        chtml: {
+          scale: 1.1
+        },
+        options: {
+          enableMenu: true,
+          menuOptions: {
+            settings: {
+              enrich: false  // Turn off Braille and voice narration text automatic generation
+            }
+          },
+          renderActions: {
+            findScript: [10, doc => {
+              for (const node of document.querySelectorAll('script[type^="math/tex"]')) {
+                const display = !!node.type.match(/; *mode=display/)
+                const math = new doc.options.MathItem(node.textContent, doc.inputJax[0], display)
+                const text = document.createTextNode('')
+                node.parentNode.replaceChild(text, node)
+                math.start = {node: text, delim: '', n: 0}
+                math.end = {node: text, delim: '', n: 0}
+                doc.math.push(math)
+              }
+            }, '']
+          }
+        }
+      }
+
+      const script = document.createElement('script')
+      script.src = 'https://cdn.jsdelivr.net/npm/mathjax@4.1.0/tex-mml-chtml.min.js'
+      script.id = 'MathJax-script'
+      script.async = true
+      document.head.appendChild(script)
+    } else {
+      MathJax.startup.document.state(0)
+      MathJax.texReset()
+      MathJax.typesetPromise()
+    }
+  }
+
+  btf.addGlobalFn('encrypt', loadMathjax, 'mathjax')
+  window.pjax ? loadMathjax() : window.addEventListener('load', loadMathjax)
+})()</script></div><div class="aplayer no-destroy" data-id="2166217715" data-server="netease" data-type="song" data-fixed="true" data-mini="true" data-listFolded="false" data-order="random" data-lrctype="1" data-preload="none" data-autoplay="false" muted></div><canvas class="fireworks" mobile="false"></canvas><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/dist/fireworks.min.js"></script><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.js"></script><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/metingjs/dist/Meting.min.js"></script><script>(() => {
+  const destroyAplayer = () => {
+    if (window.aplayers) {
+      for (let i = 0; i < window.aplayers.length; i++) {
+        if (!window.aplayers[i].options.fixed) {
+          window.aplayers[i].destroy()
+        }
+      }
+    }
+  }
+
+  const runMetingJS = () => {
+    typeof loadMeting === 'function' && document.getElementsByClassName('aplayer').length && loadMeting()
+  }
+
+  btf.addGlobalFn('pjaxSend', destroyAplayer, 'destroyAplayer')
+  btf.addGlobalFn('pjaxComplete', loadMeting, 'runMetingJS')
+})()</script><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js" defer="defer"></script><script>document.addEventListener('DOMContentLoaded', () => {
+  const pjaxSelectors = ["head > title","#config-diff","#body-wrap","#rightside-config-hide","#rightside-config-show",".js-pjax"]
+
+  window.pjax = new Pjax({
+    elements: 'a:not([target="_blank"])',
+    selectors: pjaxSelectors,
+    cacheBust: false,
+    analytics: false,
+    scrollRestoration: false
+  })
+
+  const triggerPjaxFn = (val) => {
+    if (!val) return
+    Object.values(val).forEach(fn => {
+      try {
+        fn()
+      } catch (err) {
+        console.debug('Pjax callback failed:', err)
+      }
+    })
+  }
+
+  document.addEventListener('pjax:send', () => {
+    // removeEventListener
+    btf.removeGlobalFnEvent('pjaxSendOnce')
+    btf.removeGlobalFnEvent('themeChange')
+
+    // reset readmode
+    const $bodyClassList = document.body.classList
+    if ($bodyClassList.contains('read-mode')) $bodyClassList.remove('read-mode')
+
+    triggerPjaxFn(window.globalFn.pjaxSend)
+  })
+
+  document.addEventListener('pjax:complete', () => {
+    btf.removeGlobalFnEvent('pjaxCompleteOnce')
+    document.querySelectorAll('script[data-pjax]').forEach(item => {
+      const newScript = document.createElement('script')
+      const content = item.text || item.textContent || item.innerHTML || ""
+      Array.from(item.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value))
+      newScript.appendChild(document.createTextNode(content))
+      item.parentNode.replaceChild(newScript, item)
+    })
+
+    triggerPjaxFn(window.globalFn.pjaxComplete)
+  })
+
+  document.addEventListener('pjax:error', e => {
+    if (e.request.status === 404) {
+      false
+        ? pjax.loadUrl('/404.html')
+        : window.location.href = e.request.responseURL
+    }
+  })
+})</script><script async data-pjax src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script></div></body></html>
